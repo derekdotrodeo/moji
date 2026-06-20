@@ -89,6 +89,7 @@ export interface RoomSnapshot {
   /** playerId -> their secret answer this round */
   assignments: Map<string, string>;
   submittedAuthorIds: Set<string>;
+  reshuffledIds: Set<string>;
   active: {
     authorId: string;
     authorName: string;
@@ -120,6 +121,7 @@ export class Room {
   private assignments = new Map<string, PromptForPlay>();
   private clues = new Map<string, string[]>(); // authorId -> emojis
   private usedPromptKeys = new Set<string>();
+  private reshufflesUsed = new Set<string>(); // playerIds who used their reshuffle this round
   private playOrder: string[] = [];
   private playIndex = 0;
   private active: ActiveClue | null = null;
@@ -238,6 +240,28 @@ export class Room {
     this.beginRound();
   }
 
+  /** Swap a player's prompt for a different one in the same category (once/round). */
+  reshufflePrompt(playerId: string): void {
+    if (this.phase !== 'CLUE_CREATION') throw new Error('Not the clue-building phase.');
+    if (!this.assignments.has(playerId)) throw new Error('You have no prompt this round.');
+    if (this.clues.has(playerId)) throw new Error('You already submitted your clue.');
+    if (this.reshufflesUsed.has(playerId)) throw new Error('You already reshuffled this round.');
+    if (!this.category) throw new Error('No category this round.');
+
+    const replacement = this.deps.content.drawOne(
+      this.category.slug,
+      this.usedPromptKeys, // excludes current assignments + everything used this game
+      this.deps.rng,
+    );
+    if (!replacement) throw new Error('No more prompts to shuffle to.');
+
+    this.assignments.set(playerId, replacement);
+    this.usedPromptKeys.add(promptKey(replacement));
+    this.reshufflesUsed.add(playerId);
+    this.touch();
+    this.changed();
+  }
+
   submitClue(playerId: string, emojis: string[]): void {
     if (this.phase !== 'CLUE_CREATION') throw new Error('Not accepting clues right now.');
     const prompt = this.assignments.get(playerId);
@@ -344,6 +368,7 @@ export class Room {
     this.roundNumber += 1;
     this.clues.clear();
     this.assignments.clear();
+    this.reshufflesUsed.clear();
     this.roundResults = null;
     this.guessFeed = [];
 
@@ -568,6 +593,7 @@ export class Room {
       players: [...this.players.values()].map(toPublicPlayer),
       assignments,
       submittedAuthorIds: new Set(this.clues.keys()),
+      reshuffledIds: new Set(this.reshufflesUsed),
       active,
       guessFeed: this.guessFeed,
       roundResults: this.roundResults,

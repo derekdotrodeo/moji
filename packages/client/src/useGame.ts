@@ -20,6 +20,7 @@ export interface GameClient {
   configure(payload: ConfigureRoomPayload): Promise<void>;
   setReady(ready: boolean): Promise<void>;
   start(): Promise<void>;
+  reshuffle(): Promise<void>;
   submitClue(emojis: string[]): Promise<void>;
   submitGuess(text: string): Promise<GuessResult>;
   skip(): Promise<void>;
@@ -86,6 +87,7 @@ export function useGame(): GameClient {
     [],
   );
   const start = useCallback<GameClient['start']>(() => emitAck('game:start'), []);
+  const reshuffle = useCallback<GameClient['reshuffle']>(() => emitAck('clue:reshuffle'), []);
   const submitClue = useCallback<GameClient['submitClue']>(
     (emojis) => emitAck('clue:submit', { emojis }),
     [],
@@ -108,6 +110,7 @@ export function useGame(): GameClient {
     configure,
     setReady,
     start,
+    reshuffle,
     submitClue,
     submitGuess,
     skip,

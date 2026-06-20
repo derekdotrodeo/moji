@@ -9,11 +9,22 @@ const PROMPTS: PromptForPlay[] = [
   { id: 'p2', answer: 'Pizza', accepted: ['Pizza'], blocklist: [], difficulty: 1 },
 ];
 
-// Deterministic content: A always gets Titanic, B always gets Pizza.
+const RESHUFFLE_PROMPT: PromptForPlay = {
+  id: 'p3',
+  answer: 'The Matrix',
+  accepted: ['The Matrix'],
+  blocklist: [],
+  difficulty: 1,
+};
+
+// Deterministic content: A always gets Titanic, B always gets Pizza; the only
+// reshuffle target is The Matrix (once it's used, drawOne returns null).
 const fakeContent = {
   dealRound: () => ({ category: { slug: 'movies', name: 'Movies' }, assignments: PROMPTS }),
   packs: () => [{ slug: 'movies', name: 'Movies', emoji: '🎬' }],
   categorySlugsForPack: () => [],
+  drawOne: (_slug: string, exclude: Set<string>) =>
+    exclude.has('p3') ? null : RESHUFFLE_PROMPT,
 } as unknown as ContentProvider;
 
 const noopHooks: RoomHooks = {
@@ -131,6 +142,46 @@ describe('Room state machine', () => {
     vi.advanceTimersByTime(5100); // through ROUND_INTRO + PROMPT_ASSIGNMENT
     expect(() => room.submitClue(a.id, [])).toThrow(/at least/i);
     expect(() => room.submitClue(a.id, ['x'])).toThrow();
+  });
+});
+
+describe('Room prompt reshuffle', () => {
+  let room: Room;
+  let a: Player;
+  let b: Player;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    room = newRoom();
+    a = room.addPlayer('Alice', 'player');
+    b = room.addPlayer('Bob', 'player');
+    room.configure(a.id, { rounds: 1 });
+    room.start(a.id);
+    vi.advanceTimersByTime(5100); // -> CLUE_CREATION
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it('swaps the prompt for a different one in the same category', () => {
+    expect(room.getSnapshot().assignments.get(a.id)).toBe('Titanic');
+    room.reshufflePrompt(a.id);
+    expect(room.getSnapshot().assignments.get(a.id)).toBe('The Matrix');
+  });
+
+  it('allows only one reshuffle per round', () => {
+    room.reshufflePrompt(a.id);
+    expect(() => room.reshufflePrompt(a.id)).toThrow(/already reshuffled/i);
+  });
+
+  it('cannot reshuffle after submitting a clue', () => {
+    room.submitClue(b.id, ['🍕']);
+    expect(() => room.reshufflePrompt(b.id)).toThrow(/already submitted/i);
+  });
+
+  it('reflects reshuffle availability in the serialized view', () => {
+    expect(serializeRoomFor(room.getSnapshot(), a.id).youCanReshuffle).toBe(true);
+    room.reshufflePrompt(a.id);
+    expect(serializeRoomFor(room.getSnapshot(), a.id).youCanReshuffle).toBe(false);
   });
 });
 

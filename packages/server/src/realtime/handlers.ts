@@ -67,6 +67,15 @@ export function registerSocketHandlers(io: Io, manager: RoomManager): void {
       }
     });
 
+    socket.on('clue:reshuffle', (ack) => {
+      try {
+        manager.command(socket.id, (room, pid) => room.reshufflePrompt(pid));
+        ok(ack, undefined);
+      } catch (err) {
+        fail(ack, err);
+      }
+    });
+
     socket.on('clue:submit', (payload, ack) => {
       try {
         manager.command(socket.id, (room, pid) => room.submitClue(pid, payload.emojis));

@@ -11,7 +11,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { db } from './client.js';
-import { categories } from './schema.js';
 import { seedDatabase } from './seedDatabase.js';
 
 export async function migrateAndSeed(): Promise<void> {
@@ -19,13 +18,10 @@ export async function migrateAndSeed(): Promise<void> {
   const migrationsFolder = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../drizzle');
   try {
     await migrate(db, { migrationsFolder });
-    const existing = await db.select({ id: categories.id }).from(categories).limit(1);
-    if (existing.length === 0) {
-      const { newPrompts } = await seedDatabase(db);
-      console.log(`[db] migrated + seeded ${newPrompts} prompts`);
-    } else {
-      console.log('[db] migrated; content already present');
-    }
+    // Seed is idempotent and also reconciles active categories, so run it every
+    // boot — content edits in seedData take effect on the next deploy.
+    const { newPrompts } = await seedDatabase(db);
+    console.log(`[db] migrated; ${newPrompts} new prompts added, content reconciled`);
   } catch (err) {
     console.warn('[db] migrate/seed skipped (running on bundled content):', (err as Error).message);
   }

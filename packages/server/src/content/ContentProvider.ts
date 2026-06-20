@@ -16,10 +16,8 @@ const PACK_EMOJI: Record<string, string> = {
   movies: '🎬',
   tv_shows: '📺',
   video_games: '🎮',
-  famous_people: '🌟',
   music_artists: '🎤',
   books: '📚',
-  historical_figures: '🗿',
   landmarks: '🏛️',
 };
 
@@ -148,6 +146,23 @@ export class ContentProvider {
     const shuffled = [...source].sort(() => pick() - 0.5);
     const assignments = shuffled.slice(0, count);
     return { category: { slug: cat.slug, name: cat.name }, assignments };
+  }
+
+  /**
+   * Draw one prompt from a category, excluding any key in `excludeKeys`.
+   * Used for the per-player prompt reshuffle. Returns null if the category has
+   * no unused prompts left.
+   */
+  drawOne(
+    categorySlug: string,
+    excludeKeys: Set<string>,
+    pick: () => number,
+  ): PromptForPlay | null {
+    const cat = this.byCategory.get(categorySlug);
+    if (!cat) return null;
+    const available = cat.prompts.filter((p) => !excludeKeys.has(promptKey(p)));
+    if (available.length === 0) return null;
+    return available[Math.floor(pick() * available.length)]!;
   }
 }
 

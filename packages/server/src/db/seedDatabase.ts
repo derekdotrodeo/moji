@@ -3,7 +3,7 @@
  * Idempotent on category slug + prompt answer, so it's safe to run on every
  * boot. Shared by the `db:seed` CLI and the startup bootstrap.
  */
-import { eq } from 'drizzle-orm';
+import { eq, inArray, notInArray } from 'drizzle-orm';
 import type { Db } from './client.js';
 import { categories, promptAnswers, prompts } from './schema.js';
 import { SEED_CATEGORIES } from '../content/seedData.js';
@@ -52,5 +52,16 @@ export async function seedDatabase(db: Db): Promise<{ categories: number; newPro
       nPrompts++;
     }
   }
+
+  // Reconcile active flags so categories removed from the seed stop being dealt
+  // (ContentProvider only loads is_active categories), and re-activate any that
+  // returned. This makes content edits take effect on the next deploy/boot.
+  const activeSlugs = SEED_CATEGORIES.map((c) => c.slug);
+  await db.update(categories).set({ isActive: true }).where(inArray(categories.slug, activeSlugs));
+  await db
+    .update(categories)
+    .set({ isActive: false })
+    .where(notInArray(categories.slug, activeSlugs));
+
   return { categories: SEED_CATEGORIES.length, newPrompts: nPrompts };
 }

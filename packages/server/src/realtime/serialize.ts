@@ -33,6 +33,11 @@ export function serializeRoomFor(snap: RoomSnapshot, recipientId: string): RoomV
     // Secret: only the recipient's own prompt is ever included.
     yourPrompt: snap.assignments.get(recipientId) ?? null,
     youSubmitted: snap.submittedAuthorIds.has(recipientId),
+    youCanReshuffle:
+      snap.phase === 'CLUE_CREATION' &&
+      snap.assignments.has(recipientId) &&
+      !snap.submittedAuthorIds.has(recipientId) &&
+      !snap.reshuffledIds.has(recipientId),
 
     activeClue: snap.active
       ? {

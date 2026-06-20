@@ -38,10 +38,18 @@ export function ClueScreen({ game, view }: { game: GameClient; view: RoomView })
   return (
     <div className="mx-auto max-w-5xl animate-moji-pop px-4 py-6">
       {/* Top bar: prompt recap + timer */}
-      <div className="mb-5 flex items-center justify-between gap-4">
+      <div className="mb-5 flex items-start justify-between gap-4">
         <div>
           <Eyebrow className="text-cyan">Clue for · {view.category?.name}</Eyebrow>
           <div className="font-display text-2xl font-extrabold sm:text-3xl">{view.yourPrompt}</div>
+          {view.youCanReshuffle && (
+            <button
+              onClick={() => game.reshuffle()}
+              className="mt-1 font-mono text-xs uppercase tracking-[1.5px] text-muted hover:text-cyan"
+            >
+              🎲 stuck? reshuffle prompt (1 left)
+            </button>
+          )}
         </div>
         <TimerChip deadlineTs={view.deadlineTs} />
       </div>

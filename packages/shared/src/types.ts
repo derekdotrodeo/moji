@@ -131,6 +131,8 @@ export interface RoomView {
   yourPrompt: string | null;
   /** Whether you have submitted your clue this round. */
   youSubmitted: boolean;
+  /** Whether you can still swap your prompt this round (one reshuffle allowed). */
+  youCanReshuffle: boolean;
 
   /** The clue currently being played (during REVEAL/GUESSING/CLUE_SCORING). */
   activeClue: ActiveClueView | null;

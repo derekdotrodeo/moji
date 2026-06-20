@@ -33,6 +33,7 @@ function snapshot(phase: GamePhase): RoomSnapshot {
       ['B', 'Pizza'],
     ]),
     submittedAuthorIds: new Set(['A', 'B']),
+    reshuffledIds: new Set<string>(),
     active: {
       authorId: 'A',
       authorName: 'A',

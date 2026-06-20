@@ -55,6 +55,8 @@ export interface ClientToServerEvents {
   'room:configure': (payload: ConfigureRoomPayload, ack: Ack) => void;
   'player:ready': (ready: boolean, ack: Ack) => void;
   'game:start': (ack: Ack) => void;
+  /** swap your prompt for a different one (once per round) */
+  'clue:reshuffle': (ack: Ack) => void;
   'clue:submit': (payload: SubmitCluePayload, ack: Ack) => void;
   'guess:submit': (payload: SubmitGuessPayload, ack: Ack<GuessResult>) => void;
   'host:skip': (ack: Ack) => void;
