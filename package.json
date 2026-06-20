@@ -1,0 +1,37 @@
+{
+  "name": "moji",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Real-time multiplayer emoji-clue party game",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/shared",
+    "packages/server",
+    "packages/client"
+  ],
+  "scripts": {
+    "build:shared": "npm run build --workspace @moji/shared",
+    "build:client": "npm run build --workspace @moji/client",
+    "build:server": "npm run build --workspace @moji/server",
+    "build": "npm run build:shared && npm run build:client && npm run build:server",
+    "dev": "npm run build:shared && concurrently -n server,client -c blue,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm run dev --workspace @moji/server",
+    "dev:client": "npm run dev --workspace @moji/client",
+    "typecheck": "npm run build:shared && npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "npm run db:generate --workspace @moji/server",
+    "db:migrate": "npm run db:migrate --workspace @moji/server",
+    "db:seed": "npm run db:seed --workspace @moji/server",
+    "start": "npm run start --workspace @moji/server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "drizzle-orm": "^0.44.7",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,18 @@
+/** Centralized, validated environment access. */
+
+function required(name: string, fallback?: string): string {
+  const v = process.env[name] ?? fallback;
+  if (v === undefined || v === '') {
+    throw new Error(`Missing required env var: ${name}`);
+  }
+  return v;
+}
+
+export const env = {
+  nodeEnv: process.env.NODE_ENV ?? 'development',
+  isProd: process.env.NODE_ENV === 'production',
+  port: Number(process.env.PORT ?? 3000),
+  publicOrigin: process.env.PUBLIC_ORIGIN ?? 'http://localhost:3000',
+  sessionSecret: required('SESSION_SECRET', 'dev-insecure-secret-change-me'),
+  databaseUrl: required('DATABASE_URL', 'postgres://moji:moji@localhost:5432/moji'),
+};

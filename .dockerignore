@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+**/dist
+**/build
+*.tsbuildinfo
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+.pgdata
+cloudflared/*.json
+*.log
+.DS_Store
+README.md
