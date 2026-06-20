@@ -47,10 +47,15 @@ export class RoomManager implements RoomHooks {
 
   join(socketId: string, payload: JoinRoomPayload): JoinOutcome {
     const displayName = sanitizeName(payload.displayName);
+    const requestedCode = payload.code?.toUpperCase();
 
-    // Reconnection: valid token + live room + known player -> rebind.
+    // Reconnection: rebind ONLY when the player is explicitly re-entering the
+    // SAME room their token is for (e.g. rejoin-by-code after a refresh). A
+    // create (no code) or a different code must NOT resurrect the old room —
+    // otherwise finishing a game and hitting "Create" drops you back into the
+    // old room's final leaderboard.
     const token = verifySessionToken(payload.sessionToken);
-    if (token) {
+    if (token && requestedCode && requestedCode === token.roomCode) {
       const room = this.store.get(token.roomCode);
       if (room && room.hasPlayer(token.playerId)) {
         this.cancelGrace(token.playerId);
@@ -66,8 +71,8 @@ export class RoomManager implements RoomHooks {
 
     // Create or look up the room.
     let room: Room;
-    if (payload.code) {
-      const found = this.store.get(payload.code.toUpperCase());
+    if (requestedCode) {
+      const found = this.store.get(requestedCode);
       if (!found) throw new Error('Room not found.');
       room = found;
     } else {

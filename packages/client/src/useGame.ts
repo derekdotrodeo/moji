@@ -21,6 +21,7 @@ export interface GameClient {
   setReady(ready: boolean): Promise<void>;
   start(): Promise<void>;
   reshuffle(): Promise<void>;
+  leave(): Promise<void>;
   submitClue(emojis: string[]): Promise<void>;
   submitGuess(text: string): Promise<GuessResult>;
   skip(): Promise<void>;
@@ -88,6 +89,17 @@ export function useGame(): GameClient {
   );
   const start = useCallback<GameClient['start']>(() => emitAck('game:start'), []);
   const reshuffle = useCallback<GameClient['reshuffle']>(() => emitAck('clue:reshuffle'), []);
+  const leave = useCallback<GameClient['leave']>(async () => {
+    try {
+      await emitAck('room:leave');
+    } catch {
+      /* leaving best-effort */
+    }
+    localStorage.removeItem(TOKEN_KEY);
+    setMyId(null);
+    setFeed([]);
+    setView(null);
+  }, []);
   const submitClue = useCallback<GameClient['submitClue']>(
     (emojis) => emitAck('clue:submit', { emojis }),
     [],
@@ -111,6 +123,7 @@ export function useGame(): GameClient {
     setReady,
     start,
     reshuffle,
+    leave,
     submitClue,
     submitGuess,
     skip,

@@ -82,7 +82,16 @@ export default function App() {
       case 'ROUND_RESULTS':
         return <Leaderboard game={game} view={view} />;
       case 'GAME_RESULTS':
-        return <Winner game={game} view={view} />;
+        return (
+          <Winner
+            game={game}
+            view={view}
+            onLeave={() => {
+              void game.leave();
+              setRoute('landing');
+            }}
+          />
+        );
       default:
         return <SplashScreen view={view} />;
     }

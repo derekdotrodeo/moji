@@ -5,7 +5,15 @@ import { Confetti } from '../components/Confetti.js';
 import { Standings } from '../components/Standings.js';
 import { Avatar, Eyebrow, Panel, StickerButton, cn } from '../ui.js';
 
-export function Winner({ game, view }: { game: GameClient; view: RoomView }) {
+export function Winner({
+  game,
+  view,
+  onLeave,
+}: {
+  game: GameClient;
+  view: RoomView;
+  onLeave: () => void;
+}) {
   const rows = view.gameResults ?? [];
   const me = view.players.find((p) => p.id === game.myId);
   const isHost = me?.isHost ?? false;
@@ -37,7 +45,10 @@ export function Winner({ game, view }: { game: GameClient; view: RoomView }) {
             </StickerButton>
             <ShareButton code={view.code} />
           </div>
-          {!isHost && <p className="mt-3 text-sm text-muted">waiting for the host to rematch…</p>}
+          <button onClick={onLeave} className="mt-4 text-sm text-muted hover:text-paper">
+            ← leave to home
+          </button>
+          {!isHost && <p className="mt-2 text-sm text-muted">waiting for the host to rematch…</p>}
         </div>
 
         {/* Final standings */}
