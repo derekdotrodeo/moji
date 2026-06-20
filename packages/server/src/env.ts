@@ -15,4 +15,6 @@ export const env = {
   publicOrigin: process.env.PUBLIC_ORIGIN ?? 'http://localhost:3000',
   sessionSecret: required('SESSION_SECRET', 'dev-insecure-secret-change-me'),
   databaseUrl: required('DATABASE_URL', 'postgres://moji:moji@localhost:5432/moji'),
+  /** apply migrations + seed on boot (set AUTO_MIGRATE=false to manage externally) */
+  autoMigrate: process.env.AUTO_MIGRATE !== 'false',
 };

@@ -17,6 +17,7 @@ import type {
 } from '@moji/shared';
 import { env } from './env.js';
 import { db } from './db/client.js';
+import { migrateAndSeed } from './db/bootstrap.js';
 import { ContentProvider } from './content/ContentProvider.js';
 import { InMemoryRoomStore } from './rooms/RoomStore.js';
 import { SocketIoBroadcaster } from './realtime/Broadcaster.js';
@@ -40,7 +41,10 @@ async function main() {
     { cors: { origin: corsOrigin, methods: ['GET', 'POST'] } },
   );
 
-  // Content
+  // Database: apply migrations + seed content on boot (non-fatal).
+  if (env.autoMigrate) await migrateAndSeed();
+
+  // Content (reads from the DB; falls back to the bundled set if unavailable).
   const content = new ContentProvider(db);
   await content.load();
 

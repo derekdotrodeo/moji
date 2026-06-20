@@ -32,9 +32,10 @@ COPY --from=builder /app/packages/shared/package.json ./packages/shared/package.
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
 COPY --from=builder /app/packages/server/package.json ./packages/server/package.json
 COPY --from=builder /app/packages/server/dist ./packages/server/dist
+# Migration SQL must ship so the server can auto-migrate on boot (see
+# db/bootstrap.ts). drizzle-orm's migrator is a runtime dep; drizzle-kit is not.
+COPY --from=builder /app/packages/server/drizzle ./packages/server/drizzle
 COPY --from=builder /app/packages/client/dist ./packages/client/dist
-# NOTE: DB migrations are run as an ops step from a dev checkout
-# (`npm run db:migrate`), not from this runtime image.
 
 EXPOSE 3000
 CMD ["node", "packages/server/dist/index.js"]
