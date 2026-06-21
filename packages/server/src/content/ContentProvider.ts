@@ -11,14 +11,11 @@ import type { Db } from '../db/client.js';
 import { categories as categoriesTbl, promptAnswers, prompts } from '../db/schema.js';
 import { SEED_CATEGORIES } from './seedData.js';
 
-/** Display emoji per content pack (keyed by category slug). */
+/** Display emoji per content pack (keyed by umbrella slug). */
 const PACK_EMOJI: Record<string, string> = {
-  movies: '🎬',
-  tv_shows: '📺',
-  video_games: '🎮',
-  music_artists: '🎤',
-  books: '📚',
-  landmarks: '🏛️',
+  screen: '🎬',
+  stories: '📚',
+  pop_culture: '🦸',
 };
 
 export interface PromptForPlay {

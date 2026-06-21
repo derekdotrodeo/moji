@@ -39,7 +39,7 @@ export function GuessScreen({ game, view }: { game: GameClient; view: RoomView }
         </div>
 
         <Eyebrow className="mb-5 hidden text-pink lg:block">
-          {clue.authorAvatar} {clue.authorName}'s clue · name the {view.category?.name}
+          {clue.authorAvatar} {clue.authorName}'s clue · {view.category?.name}
         </Eyebrow>
 
         <div className="flex max-w-3xl animate-moji-pop flex-wrap items-center justify-center gap-2 sm:gap-3">

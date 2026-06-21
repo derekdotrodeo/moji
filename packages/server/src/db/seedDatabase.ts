@@ -1,7 +1,12 @@
 /**
- * Seed categories + prompts (+ canonical/alias answers) into Postgres.
- * Idempotent on category slug + prompt answer, so it's safe to run on every
- * boot. Shared by the `db:seed` CLI and the startup bootstrap.
+ * Seed/upsert categories + prompts (+ canonical/alias answers) into Postgres.
+ * Safe to run on every boot:
+ *   - new prompts are inserted,
+ *   - an existing answer that moved to a different category is RE-HOMED and its
+ *     aliases refreshed (so a content restructure applies without wiping the DB),
+ *   - categories absent from the seed are deactivated (ContentProvider only
+ *     loads active categories).
+ * Shared by the `db:seed` CLI and the startup bootstrap.
  */
 import { eq, inArray, notInArray } from 'drizzle-orm';
 import type { Db } from './client.js';
@@ -9,10 +14,11 @@ import { categories, promptAnswers, prompts } from './schema.js';
 import { SEED_CATEGORIES } from '../content/seedData.js';
 
 export async function seedDatabase(db: Db): Promise<{ categories: number; newPrompts: number }> {
-  let nPrompts = 0;
+  // Ensure each umbrella category exists; collect slug -> id.
+  const categoryId = new Map<string, string>();
   for (const [i, cat] of SEED_CATEGORIES.entries()) {
     const existing = await db.select().from(categories).where(eq(categories.slug, cat.slug));
-    const categoryId =
+    const id =
       existing[0]?.id ??
       (
         await db
@@ -20,19 +26,44 @@ export async function seedDatabase(db: Db): Promise<{ categories: number; newPro
           .values({ slug: cat.slug, name: cat.name, description: cat.description, sortOrder: i })
           .returning()
       )[0]!.id;
+    categoryId.set(cat.slug, id);
+  }
 
+  // Load all existing prompts once (answer -> {id, categoryId}) to avoid a query per prompt.
+  const existingPrompts = await db
+    .select({ id: prompts.id, answer: prompts.answer, categoryId: prompts.categoryId })
+    .from(prompts);
+  const byAnswer = new Map(existingPrompts.map((p) => [p.answer, p]));
+
+  const writeAnswers = async (promptId: string, p: { answer: string; aliases?: string[] }) => {
+    await db.delete(promptAnswers).where(eq(promptAnswers.promptId, promptId));
+    await db.insert(promptAnswers).values({ promptId, text: p.answer, matchType: 'canonical' });
+    for (const alias of p.aliases ?? []) {
+      await db.insert(promptAnswers).values({ promptId, text: alias, matchType: 'alias' });
+    }
+  };
+
+  let nNew = 0;
+  for (const cat of SEED_CATEGORIES) {
+    const cid = categoryId.get(cat.slug)!;
     for (const p of cat.prompts) {
-      const dupe = await db
-        .select({ id: prompts.id })
-        .from(prompts)
-        .where(eq(prompts.answer, p.answer));
-      if (dupe.length > 0) continue;
-
+      const existing = byAnswer.get(p.answer);
+      if (existing) {
+        if (existing.categoryId !== cid) {
+          // Re-home to the current umbrella and refresh aliases/scores.
+          await db
+            .update(prompts)
+            .set({ categoryId: cid, difficulty: p.difficulty, popularity: p.popularity })
+            .where(eq(prompts.id, existing.id));
+          await writeAnswers(existing.id, p);
+        }
+        continue;
+      }
       const inserted = (
         await db
           .insert(prompts)
           .values({
-            categoryId,
+            categoryId: cid,
             answer: p.answer,
             difficulty: p.difficulty,
             popularity: p.popularity,
@@ -40,22 +71,12 @@ export async function seedDatabase(db: Db): Promise<{ categories: number; newPro
           })
           .returning()
       )[0]!;
-
-      await db
-        .insert(promptAnswers)
-        .values({ promptId: inserted.id, text: p.answer, matchType: 'canonical' });
-      for (const alias of p.aliases ?? []) {
-        await db
-          .insert(promptAnswers)
-          .values({ promptId: inserted.id, text: alias, matchType: 'alias' });
-      }
-      nPrompts++;
+      await writeAnswers(inserted.id, p);
+      nNew++;
     }
   }
 
-  // Reconcile active flags so categories removed from the seed stop being dealt
-  // (ContentProvider only loads is_active categories), and re-activate any that
-  // returned. This makes content edits take effect on the next deploy/boot.
+  // Reconcile active flags: only seeded umbrellas are dealt; old categories off.
   const activeSlugs = SEED_CATEGORIES.map((c) => c.slug);
   await db.update(categories).set({ isActive: true }).where(inArray(categories.slug, activeSlugs));
   await db
@@ -63,5 +84,5 @@ export async function seedDatabase(db: Db): Promise<{ categories: number; newPro
     .set({ isActive: false })
     .where(notInArray(categories.slug, activeSlugs));
 
-  return { categories: SEED_CATEGORIES.length, newPrompts: nPrompts };
+  return { categories: SEED_CATEGORIES.length, newPrompts: nNew };
 }
