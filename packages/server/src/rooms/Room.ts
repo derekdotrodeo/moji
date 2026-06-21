@@ -274,10 +274,13 @@ export class Room {
     this.clues.set(playerId, emojis);
     this.touch();
     this.changed();
-    // Early-finish: everyone who has a prompt has submitted.
-    if ([...this.assignments.keys()].every((id) => this.clues.has(id))) {
-      this.startReveals();
-    }
+    // Early-finish: advance as soon as every CONNECTED player has submitted, so a
+    // disconnected/absent player can't stall the round for everyone.
+    const stillBuilding = [...this.assignments.keys()].some((id) => {
+      const player = this.players.get(id);
+      return player?.connection === 'CONNECTED' && !this.clues.has(id);
+    });
+    if (!stillBuilding) this.startReveals();
   }
 
   submitGuess(playerId: string, text: string): GuessResult {
@@ -425,6 +428,12 @@ export class Room {
   }
 
   private startGuessing(): void {
+    // No one can guess this clue (e.g. the only other player dropped) — resolve
+    // it immediately instead of sitting on a dead timer.
+    if (this.eligibleGuessers() === 0) {
+      this.endGuessing();
+      return;
+    }
     if (this.active) this.active.revealAt = Date.now();
     this.transition('GUESSING', this.config.guessingSeconds * 1000, () => this.endGuessing());
   }

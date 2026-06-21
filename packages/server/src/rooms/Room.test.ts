@@ -185,6 +185,36 @@ describe('Room prompt reshuffle', () => {
   });
 });
 
+describe('Room non-submit handling', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('plays the submitted clue when the other player never submits (skips them)', () => {
+    const room = newRoom();
+    const a = room.addPlayer('A', 'player');
+    room.addPlayer('B', 'player');
+    room.configure(a.id, { rounds: 1 });
+    room.start(a.id);
+    vi.advanceTimersByTime(5100); // -> CLUE_CREATION
+    room.submitClue(a.id, ['🚢']);
+    // B never submits; let the creation timer expire (default 60s)
+    vi.advanceTimersByTime(60_000);
+    expect(room.phase).toBe('CLUE_REVEAL'); // round is NOT skipped — A's clue plays
+  });
+
+  it('early-finishes without waiting on a disconnected player', () => {
+    const room = newRoom();
+    const a = room.addPlayer('A', 'player');
+    const b = room.addPlayer('B', 'player');
+    room.configure(a.id, { rounds: 1 });
+    room.start(a.id);
+    vi.advanceTimersByTime(5100);
+    room.setConnection(b.id, 'DISCONNECTED');
+    room.submitClue(a.id, ['🚢']); // A is the only connected player -> advance now
+    expect(room.phase).toBe('CLUE_REVEAL');
+  });
+});
+
 describe('Room guessing rules', () => {
   let room: Room;
   let a: Player;
