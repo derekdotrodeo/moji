@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useGame } from './useGame.js';
+import { getStoredAvatar, getStoredName, tokenRoomCode } from './session.js';
 import { Landing } from './screens/Landing.js';
 import { Join } from './screens/Join.js';
 import { LobbyScreen } from './screens/Lobby.js';
@@ -18,15 +19,33 @@ export default function App() {
   const { view, error, clearError, connected } = game;
   const [route, setRoute] = useState<PreGameRoute>('landing');
   const [prefillCode, setPrefillCode] = useState('');
+  // Capture the URL on first render, before the URL-sync effect can change it.
+  const initialCode = useRef(window.location.pathname.match(/^\/r\/([0-9A-Za-z]+)/)?.[1]?.toUpperCase());
 
-  // Deep link: /r/<CODE> jumps to Join with the code pre-filled.
+  // On load with /r/<CODE>: silently rejoin if it's the room our token is for
+  // (e.g. an accidental refresh), otherwise open Join with the code pre-filled.
   useEffect(() => {
-    const m = window.location.pathname.match(/^\/r\/([0-9A-Za-z]+)/);
-    if (m) {
-      setPrefillCode(m[1]!.toUpperCase());
+    const code = initialCode.current;
+    if (!code) return;
+    if (tokenRoomCode() === code) {
+      void game.join(getStoredName() || 'Player', getStoredAvatar(), code).catch(() => {
+        setPrefillCode(code);
+        setRoute('join');
+      });
+    } else {
+      setPrefillCode(code);
       setRoute('join');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep the browser URL in sync: /r/<CODE> while in a room, / on the landing.
+  useEffect(() => {
+    const path = view?.code ? `/r/${view.code}` : route === 'landing' ? '/' : null;
+    if (path && window.location.pathname !== path) {
+      window.history.replaceState(null, '', path);
+    }
+  }, [view?.code, route]);
 
   useEffect(() => {
     if (!error) return;

@@ -7,8 +7,7 @@ import type {
   RoomView,
 } from '@moji/shared';
 import { emitAck, socket } from './socket.js';
-
-const TOKEN_KEY = 'moji.sessionToken';
+import { clearToken, getToken, saveSession } from './session.js';
 
 export interface GameClient {
   connected: boolean;
@@ -67,14 +66,13 @@ export function useGame(): GameClient {
   }, []);
 
   const join = useCallback<GameClient['join']>(async (displayName, avatar, code) => {
-    const sessionToken = localStorage.getItem(TOKEN_KEY) ?? undefined;
     const res = await emitAck<JoinRoomResult>('room:join', {
       displayName,
       avatar,
       code,
-      sessionToken,
+      sessionToken: getToken(),
     });
-    localStorage.setItem(TOKEN_KEY, res.sessionToken);
+    saveSession(res.sessionToken, displayName, avatar);
     setMyId(res.playerId);
     return res;
   }, []);
@@ -95,7 +93,7 @@ export function useGame(): GameClient {
     } catch {
       /* leaving best-effort */
     }
-    localStorage.removeItem(TOKEN_KEY);
+    clearToken();
     setMyId(null);
     setFeed([]);
     setView(null);
