@@ -10,7 +10,7 @@ import { GuessScreen } from './screens/Guess.js';
 import { RevealScreen } from './screens/Reveal.js';
 import { Leaderboard } from './screens/Leaderboard.js';
 import { Winner } from './screens/Winner.js';
-import { SplashScreen } from './screens.js';
+import { JoiningNextRound, SplashScreen } from './screens.js';
 
 type PreGameRoute = 'landing' | 'create' | 'join';
 
@@ -90,9 +90,10 @@ export default function App() {
       case 'ROUND_INTRO':
         return <RoundIntro view={view} />;
       case 'PROMPT_ASSIGNMENT':
-        return <PromptAssignment view={view} />;
+        // A player who joined mid-round has no prompt yet — they're dealt in next round.
+        return view.yourPrompt ? <PromptAssignment view={view} /> : <JoiningNextRound />;
       case 'CLUE_CREATION':
-        return <ClueScreen game={game} view={view} />;
+        return view.yourPrompt ? <ClueScreen game={game} view={view} /> : <JoiningNextRound />;
       case 'CLUE_REVEAL':
       case 'GUESSING':
         return <GuessScreen game={game} view={view} />;

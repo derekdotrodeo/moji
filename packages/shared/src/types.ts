@@ -55,7 +55,7 @@ export interface RoomConfig {
 }
 
 export const DEFAULT_ROOM_CONFIG: RoomConfig = {
-  rounds: 5, // design default (3 / [5] / 8)
+  rounds: 3, // snappier first games; host can bump to 5 / 8
   clueCreationSeconds: 60,
   guessingSeconds: 30, // design default (20 / [30] / 45)
   packSlug: '',

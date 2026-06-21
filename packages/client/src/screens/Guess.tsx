@@ -16,7 +16,7 @@ export function GuessScreen({ game, view }: { game: GameClient; view: RoomView }
   const avatarOf = (id: string) => view.players.find((p) => p.id === id)?.avatar ?? '❓';
 
   return (
-    <div className="mx-auto h-screen max-w-7xl gap-4 px-4 py-4 lg:grid lg:grid-cols-[236px_1fr_372px]">
+    <div className="mx-auto flex h-[100dvh] max-w-7xl flex-col gap-4 px-4 py-4 lg:grid lg:grid-cols-[236px_1fr_372px]">
       {/* Live scores rail (desktop) */}
       <aside className="hidden self-start lg:block">
         <Eyebrow className="mb-2">Live Scores</Eyebrow>
@@ -24,7 +24,7 @@ export function GuessScreen({ game, view }: { game: GameClient; view: RoomView }
       </aside>
 
       {/* Center: the clue hero */}
-      <main className="flex flex-col items-center justify-center text-center">
+      <main className="flex shrink-0 flex-col items-center text-center lg:flex-1 lg:justify-center">
         {/* Mobile header */}
         <div className="mb-4 flex w-full items-center justify-between lg:hidden">
           <Eyebrow className="text-pink">
@@ -67,7 +67,7 @@ export function GuessScreen({ game, view }: { game: GameClient; view: RoomView }
       </main>
 
       {/* Right panel: timer + score + feed + input */}
-      <section className="mt-4 flex min-h-0 flex-col lg:mt-0">
+      <section className="flex min-h-0 flex-1 flex-col">
         <div className="mb-3 hidden items-center justify-between lg:flex">
           <div>
             <Eyebrow>

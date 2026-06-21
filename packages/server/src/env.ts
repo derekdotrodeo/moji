@@ -17,4 +17,6 @@ export const env = {
   databaseUrl: required('DATABASE_URL', 'postgres://moji:moji@localhost:5432/moji'),
   /** apply migrations + seed on boot (set AUTO_MIGRATE=false to manage externally) */
   autoMigrate: process.env.AUTO_MIGRATE !== 'false',
+  /** log incorrect guesses + the answer, to tune the matcher (set =false to silence) */
+  logGuessMisses: process.env.LOG_GUESS_MISSES !== 'false',
 };

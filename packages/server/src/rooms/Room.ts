@@ -29,6 +29,7 @@ import {
   type ScoringConfig,
 } from '@moji/shared';
 import { isCorrectGuess } from '../game/guessMatching.js';
+import { env } from '../env.js';
 import type { ContentProvider, PromptForPlay } from '../content/ContentProvider.js';
 import { promptKey } from '../content/ContentProvider.js';
 
@@ -324,6 +325,9 @@ export class Room {
       this.active.solvers.set(playerId, { rank: solveRank, ms: elapsedMs, points });
       player.guesserPointsRound += points;
       player.score += points;
+    } else if (env.logGuessMisses) {
+      // Tuning data: review these for near-misses the matcher should accept.
+      console.log(`[guess-miss] ${this.code} "${text}" != "${prompt.answer}"`);
     }
 
     // Broadcast the guess. Correct guesses are blanked so the answer doesn't
