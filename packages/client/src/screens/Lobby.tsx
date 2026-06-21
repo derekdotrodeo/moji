@@ -16,15 +16,15 @@ export function LobbyScreen({ game, view }: { game: GameClient; view: RoomView }
   const packOptions = [{ slug: '', name: 'Surprise', emoji: '🎲' }, ...view.packs];
 
   return (
-    <div className="mx-auto max-w-5xl animate-moji-pop px-4 py-8">
-      <header className="mb-6">
+    <div className="mx-auto max-w-5xl animate-moji-pop px-4 py-4 sm:py-6">
+      <header className="mb-4">
         <Eyebrow className="text-pink">
           PLAYERS · {readyCount}/{players.length} READY
         </Eyebrow>
-        <h1 className="whitespace-nowrap font-display text-4xl font-extrabold sm:text-5xl">
+        <h1 className="whitespace-nowrap font-display text-3xl font-extrabold sm:text-5xl">
           The Lobby
         </h1>
-        <p className="text-muted">waiting on the squad…</p>
+        <p className="text-sm text-muted">waiting on the squad…</p>
       </header>
 
       <div className="grid gap-6 md:grid-cols-[1fr_392px]">
@@ -36,12 +36,12 @@ export function LobbyScreen({ game, view }: { game: GameClient; view: RoomView }
         </div>
 
         {/* Settings sidebar */}
-        <Panel className="space-y-5 p-5">
+        <Panel className="space-y-4 self-start p-4">
           <RoomCode code={view.code} />
 
           <div>
-            <Eyebrow className="mb-3">Host Settings</Eyebrow>
-            <div className="space-y-4">
+            <Eyebrow className="mb-2">Host Settings</Eyebrow>
+            <div className="space-y-3">
               <Setting label="Rounds">
                 <Segmented
                   options={ROUND_OPTS.map((v) => ({ label: String(v), value: v }))}
@@ -80,7 +80,7 @@ export function LobbyScreen({ game, view }: { game: GameClient; view: RoomView }
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 border-t border-hairline pt-4">
+          <div className="flex flex-col gap-2 border-t border-hairline pt-3">
             <StickerButton
               variant={me?.ready ? 'mint' : 'cyan'}
               className="w-full"
