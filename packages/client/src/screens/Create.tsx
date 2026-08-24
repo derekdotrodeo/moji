@@ -62,7 +62,7 @@ export function ClueScreen({ game, view }: { game: GameClient; view: RoomView })
               onClick={() => game.reshuffle()}
               className="mt-1 font-mono text-xs uppercase tracking-[1.5px] text-muted hover:text-cyan"
             >
-              🎲 stuck? reshuffle prompt (1 left)
+              🎲 stuck? reshuffle prompt ({view.yourReshufflesLeft} left)
             </button>
           )}
         </div>

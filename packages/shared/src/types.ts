@@ -52,6 +52,8 @@ export interface RoomConfig {
   guessingSeconds: number;
   /** selected content pack; '' = any active content */
   packSlug: string;
+  /** prompt swaps each player gets per round; 0 turns the feature off */
+  reshuffles: number;
 }
 
 export const DEFAULT_ROOM_CONFIG: RoomConfig = {
@@ -59,6 +61,7 @@ export const DEFAULT_ROOM_CONFIG: RoomConfig = {
   clueCreationSeconds: 60,
   guessingSeconds: 30, // design default (20 / [30] / 45)
   packSlug: '',
+  reshuffles: 3,
 };
 
 /** A single emoji clue authored by a player for their secret prompt. */
@@ -131,8 +134,10 @@ export interface RoomView {
   yourPrompt: string | null;
   /** Whether you have submitted your clue this round. */
   youSubmitted: boolean;
-  /** Whether you can still swap your prompt this round (one reshuffle allowed). */
+  /** Whether you can still swap your prompt this round. */
   youCanReshuffle: boolean;
+  /** Prompt swaps you have left this round (config.reshuffles minus used). */
+  yourReshufflesLeft: number;
 
   /** The clue currently being played (during REVEAL/GUESSING/CLUE_SCORING). */
   activeClue: ActiveClueView | null;

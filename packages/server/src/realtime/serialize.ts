@@ -18,6 +18,11 @@ export function serializeRoomFor(snap: RoomSnapshot, recipientId: string): RoomV
     if (snap.phase === 'CLUE_SCORING' || youAreAuthor) activeAnswer = snap.active.answer;
   }
 
+  const reshufflesLeft = Math.max(
+    0,
+    snap.config.reshuffles - (snap.reshufflesUsed.get(recipientId) ?? 0),
+  );
+
   return {
     code: snap.code,
     phase: snap.phase,
@@ -33,11 +38,12 @@ export function serializeRoomFor(snap: RoomSnapshot, recipientId: string): RoomV
     // Secret: only the recipient's own prompt is ever included.
     yourPrompt: snap.assignments.get(recipientId) ?? null,
     youSubmitted: snap.submittedAuthorIds.has(recipientId),
+    yourReshufflesLeft: reshufflesLeft,
     youCanReshuffle:
       snap.phase === 'CLUE_CREATION' &&
       snap.assignments.has(recipientId) &&
       !snap.submittedAuthorIds.has(recipientId) &&
-      !snap.reshuffledIds.has(recipientId),
+      reshufflesLeft > 0,
 
     activeClue: snap.active
       ? {

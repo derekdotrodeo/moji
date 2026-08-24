@@ -38,6 +38,7 @@ export interface ConfigureRoomPayload {
   clueCreationSeconds?: number;
   guessingSeconds?: number;
   packSlug?: string;
+  reshuffles?: number;
 }
 
 export interface SubmitCluePayload {

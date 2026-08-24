@@ -22,7 +22,13 @@ function snapshot(phase: GamePhase): RoomSnapshot {
     phase,
     version: 1,
     deadlineTs: null,
-    config: { rounds: 3, clueCreationSeconds: 90, guessingSeconds: 40, packSlug: '' },
+    config: {
+      rounds: 3,
+      clueCreationSeconds: 90,
+      guessingSeconds: 40,
+      packSlug: '',
+      reshuffles: 3,
+    },
     packs: [],
     hostId: 'A',
     roundNumber: 1,
@@ -33,7 +39,7 @@ function snapshot(phase: GamePhase): RoomSnapshot {
       ['B', 'Pizza'],
     ]),
     submittedAuthorIds: new Set(['A', 'B']),
-    reshuffledIds: new Set<string>(),
+    reshufflesUsed: new Map<string, number>(),
     active: {
       authorId: 'A',
       authorName: 'A',

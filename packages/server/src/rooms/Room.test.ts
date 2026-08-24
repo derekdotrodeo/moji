@@ -164,6 +164,36 @@ describe('Room state machine', () => {
   });
 });
 
+/** Content with an endless supply of alternates, so the *limit* is what bites. */
+function deepRoom(config: { reshuffles?: number } = {}): { room: Room; a: Player; b: Player } {
+  let n = 0;
+  const content = {
+    dealRound: () => ({ category: { slug: 'movies', name: 'Movies' }, assignments: PROMPTS }),
+    packs: () => [{ slug: 'movies', name: 'Movies', emoji: '🎬' }],
+    categorySlugsForPack: () => [],
+    drawOne: () => ({
+      id: `alt${++n}`,
+      answer: `Alternate ${n}`,
+      accepted: [`Alternate ${n}`],
+      blocklist: [],
+      difficulty: 1,
+    }),
+  } as unknown as ContentProvider;
+
+  const room = new Room('DEEP', {
+    content,
+    scoring: DEFAULT_SCORING,
+    rng: () => 0.5,
+    hooks: noopHooks,
+  });
+  const a = room.addPlayer('Alice', 'player');
+  const b = room.addPlayer('Bob', 'player');
+  room.configure(a.id, { rounds: 1, ...config });
+  room.start(a.id);
+  vi.advanceTimersByTime(5100); // -> CLUE_CREATION
+  return { room, a, b };
+}
+
 describe('Room prompt reshuffle', () => {
   let room: Room;
   let a: Player;
@@ -187,9 +217,31 @@ describe('Room prompt reshuffle', () => {
     expect(room.getSnapshot().assignments.get(a.id)).toBe('The Matrix');
   });
 
-  it('allows only one reshuffle per round', () => {
-    room.reshufflePrompt(a.id);
-    expect(() => room.reshufflePrompt(a.id)).toThrow(/already reshuffled/i);
+  it('allows the configured number of swaps per round, then stops', () => {
+    const { room: deep, a: alice } = deepRoom({ reshuffles: 1 });
+    deep.reshufflePrompt(alice.id);
+    expect(() => deep.reshufflePrompt(alice.id)).toThrow(/all 1 prompt swaps/i);
+  });
+
+  it('defaults to three swaps a round', () => {
+    const deep = deepRoom();
+    for (let i = 0; i < 3; i++) deep.room.reshufflePrompt(deep.a.id);
+    expect(() => deep.room.reshufflePrompt(deep.a.id)).toThrow(/all 3 prompt swaps/i);
+  });
+
+  it('can be turned off entirely', () => {
+    const deep = deepRoom({ reshuffles: 0 });
+    expect(() => deep.room.reshufflePrompt(deep.a.id)).toThrow(/turned off/i);
+    expect(serializeRoomFor(deep.room.getSnapshot(), deep.a.id).youCanReshuffle).toBe(false);
+  });
+
+  it('clamps a silly limit rather than trusting the host', () => {
+    const lobby = newRoom(); // configure() only applies in the lobby
+    const host = lobby.addPlayer('Alice', 'player');
+    lobby.configure(host.id, { reshuffles: 99 });
+    expect(lobby.getSnapshot().config.reshuffles).toBe(5);
+    lobby.configure(host.id, { reshuffles: -4 });
+    expect(lobby.getSnapshot().config.reshuffles).toBe(0);
   });
 
   it('cannot reshuffle after submitting a clue', () => {
@@ -197,10 +249,26 @@ describe('Room prompt reshuffle', () => {
     expect(() => room.reshufflePrompt(b.id)).toThrow(/already submitted/i);
   });
 
-  it('reflects reshuffle availability in the serialized view', () => {
-    expect(serializeRoomFor(room.getSnapshot(), a.id).youCanReshuffle).toBe(true);
-    room.reshufflePrompt(a.id);
-    expect(serializeRoomFor(room.getSnapshot(), a.id).youCanReshuffle).toBe(false);
+  it('counts the remaining swaps down in the serialized view', () => {
+    const { room: deep, a: alice } = deepRoom();
+    const left = () => serializeRoomFor(deep.getSnapshot(), alice.id).yourReshufflesLeft;
+    expect(left()).toBe(3);
+    expect(serializeRoomFor(deep.getSnapshot(), alice.id).youCanReshuffle).toBe(true);
+
+    deep.reshufflePrompt(alice.id);
+    expect(left()).toBe(2);
+    deep.reshufflePrompt(alice.id);
+    deep.reshufflePrompt(alice.id);
+    expect(left()).toBe(0);
+    expect(serializeRoomFor(deep.getSnapshot(), alice.id).youCanReshuffle).toBe(false);
+  });
+
+  it('gives each player their own allowance, refreshed every round', () => {
+    const { room: deep, a: alice, b: bob } = deepRoom();
+    deep.reshufflePrompt(alice.id);
+    deep.reshufflePrompt(alice.id);
+    // Bob's allowance is untouched by Alice burning hers
+    expect(serializeRoomFor(deep.getSnapshot(), bob.id).yourReshufflesLeft).toBe(3);
   });
 });
 

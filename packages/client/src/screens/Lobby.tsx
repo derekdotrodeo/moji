@@ -5,6 +5,7 @@ import { Avatar, Eyebrow, Panel, Segmented, StickerButton, cn } from '../ui.js';
 
 const ROUND_OPTS = [3, 5, 8];
 const TIMER_OPTS = [20, 30, 45];
+const RESHUFFLE_OPTS = [0, 1, 3, 5];
 
 export function LobbyScreen({ game, view }: { game: GameClient; view: RoomView }) {
   const me = view.players.find((p) => p.id === game.myId);
@@ -56,6 +57,14 @@ export function LobbyScreen({ game, view }: { game: GameClient; view: RoomView }
                   value={view.config.guessingSeconds}
                   disabled={!isHost}
                   onChange={(guessingSeconds) => game.configure({ guessingSeconds })}
+                />
+              </Setting>
+              <Setting label="Prompt swaps">
+                <Segmented
+                  options={RESHUFFLE_OPTS.map((v) => ({ label: v ? String(v) : 'off', value: v }))}
+                  value={view.config.reshuffles}
+                  disabled={!isHost}
+                  onChange={(reshuffles) => game.configure({ reshuffles })}
                 />
               </Setting>
               <Setting label="Pack">

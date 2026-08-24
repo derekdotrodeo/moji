@@ -99,7 +99,8 @@ export interface RoomSnapshot {
   /** playerId -> their secret answer this round */
   assignments: Map<string, string>;
   submittedAuthorIds: Set<string>;
-  reshuffledIds: Set<string>;
+  /** playerId -> prompt swaps used this round */
+  reshufflesUsed: Map<string, number>;
   active: {
     authorId: string;
     authorName: string;
@@ -133,7 +134,7 @@ export class Room {
   private assignments = new Map<string, PromptForPlay>();
   private clues = new Map<string, string[]>(); // authorId -> emojis
   private usedPromptKeys = new Set<string>();
-  private reshufflesUsed = new Set<string>(); // playerIds who used their reshuffle this round
+  private reshufflesUsed = new Map<string, number>(); // playerId -> swaps used this round
   private playOrder: string[] = [];
   private playIndex = 0;
   private active: ActiveClue | null = null;
@@ -222,6 +223,7 @@ export class Room {
     if (payload.guessingSeconds !== undefined)
       this.config.guessingSeconds = clamp(payload.guessingSeconds, 15, 120);
     if (payload.packSlug !== undefined) this.config.packSlug = payload.packSlug;
+    if (payload.reshuffles !== undefined) this.config.reshuffles = clamp(payload.reshuffles, 0, 5);
     this.changed();
   }
 
@@ -254,12 +256,19 @@ export class Room {
     this.beginRound();
   }
 
-  /** Swap a player's prompt for a different one in the same category (once/round). */
+  /** Swap a player's prompt for a different one in the same category. */
   reshufflePrompt(playerId: string): void {
     if (this.phase !== 'CLUE_CREATION') throw new Error('Not the clue-building phase.');
     if (!this.assignments.has(playerId)) throw new Error('You have no prompt this round.');
     if (this.clues.has(playerId)) throw new Error('You already submitted your clue.');
-    if (this.reshufflesUsed.has(playerId)) throw new Error('You already reshuffled this round.');
+    const used = this.reshufflesUsed.get(playerId) ?? 0;
+    if (used >= this.config.reshuffles) {
+      throw new Error(
+        this.config.reshuffles === 0
+          ? 'Prompt swaps are turned off for this game.'
+          : `You've used all ${this.config.reshuffles} prompt swaps this round.`,
+      );
+    }
     if (!this.category) throw new Error('No category this round.');
 
     const replacement = this.deps.content.drawOne(
@@ -271,7 +280,7 @@ export class Room {
 
     this.assignments.set(playerId, replacement);
     this.usedPromptKeys.add(promptKey(replacement));
-    this.reshufflesUsed.add(playerId);
+    this.reshufflesUsed.set(playerId, used + 1);
     this.touch();
     this.changed();
   }
@@ -677,7 +686,7 @@ export class Room {
       players: [...this.players.values()].map(toPublicPlayer),
       assignments,
       submittedAuthorIds: new Set(this.clues.keys()),
-      reshuffledIds: new Set(this.reshufflesUsed),
+      reshufflesUsed: new Map(this.reshufflesUsed),
       active,
       guessFeed: this.guessFeed,
       roundResults: this.roundResults,
