@@ -98,7 +98,7 @@ export default function App() {
       case 'GUESSING':
         return <GuessScreen game={game} view={view} />;
       case 'CLUE_SCORING':
-        return <RevealScreen view={view} />;
+        return <RevealScreen game={game} view={view} />;
       case 'ROUND_RESULTS':
         return <Leaderboard game={game} view={view} />;
       case 'GAME_RESULTS':

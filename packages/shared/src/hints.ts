@@ -13,8 +13,20 @@
 
 /** Dead air before the first letter drops, so the clue gets a fair look first. */
 export const HINT_START_DELAY_MS = 5_000;
-/** Share of an answer's letters shown by the end of the guess window. */
-export const HINT_REVEAL_FRACTION = 0.75;
+/**
+ * Share of an answer's letters shown by the end of the guess window.
+ *
+ * The count is `floor(letters × fraction)`, so it already scales with the
+ * answer's length — the job of this number is to pick how much of a short
+ * answer a hint is allowed to give away, because that is where a generous
+ * fraction does the damage. At 0.75, `Jaws` finished the window as `J_ws` and
+ * `The Lion King` showed 8 of its 11 letters, which turns the back half of
+ * every clue into hangman and stops anyone looking at the emoji at all.
+ *
+ * At 0.4 a 4-letter answer drops exactly one letter and an 11-letter one drops
+ * four: enough to break a stall, not enough to replace the puzzle.
+ */
+export const HINT_REVEAL_FRACTION = 0.4;
 /** Stand-in for a letter that has not been revealed yet. */
 export const HINT_BLANK = '_';
 

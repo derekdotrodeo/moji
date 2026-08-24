@@ -94,6 +94,24 @@ export function registerSocketHandlers(io: Io, manager: RoomManager): void {
       }
     });
 
+    socket.on('clue:bump', (ack) => {
+      try {
+        manager.command(socket.id, (room, pid) => room.bumpClue(pid));
+        ok(ack, undefined);
+      } catch (err) {
+        fail(ack, err);
+      }
+    });
+
+    socket.on('clue:chat', (payload, ack) => {
+      try {
+        manager.command(socket.id, (room, pid) => room.sendClueChat(pid, payload.text));
+        ok(ack, undefined);
+      } catch (err) {
+        fail(ack, err);
+      }
+    });
+
     socket.on('host:skip', (ack) => {
       try {
         manager.command(socket.id, (room, pid) => room.hostSkip(pid));

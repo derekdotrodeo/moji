@@ -1,4 +1,5 @@
-import type { ActiveClueView, RoomView } from '@moji/shared';
+import type { ActiveClueView, ChatMessage, RoomView } from '@moji/shared';
+import type { GameClient } from '../useGame.js';
 import { Eyebrow, Panel, cn } from '../ui.js';
 
 const ordinal = (n: number) => {
@@ -8,7 +9,7 @@ const ordinal = (n: number) => {
 };
 const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
 
-export function RevealScreen({ view }: { view: RoomView }) {
+export function RevealScreen({ game, view }: { game: GameClient; view: RoomView }) {
   const clue = view.activeClue;
   if (!clue || !clue.answer) return null;
   const solved = !!clue.yourSolve;
@@ -39,11 +40,15 @@ export function RevealScreen({ view }: { view: RoomView }) {
             ))}
           </div>
 
-          <div className="mt-4">
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2 lg:justify-start">
             <span className="inline-flex items-center gap-2 rounded-pill border border-hairline2 bg-panel2 px-3 py-1.5 text-sm">
               clue by {clue.authorAvatar} <b>{clue.authorName}</b>
             </span>
+            {!clue.youAreAuthor && <BumpButton clue={clue} onBump={() => void game.bump()} />}
           </div>
+
+          {/* Now that the answer is out, everyone gets to see the back-channel. */}
+          {game.chat.length > 0 && <ChatRecap messages={game.chat} />}
         </div>
 
         {/* Right: your result + stats */}
@@ -61,8 +66,13 @@ export function RevealScreen({ view }: { view: RoomView }) {
             />
             <Stat
               label={`${clue.authorName} earned`}
-              value={`+${clue.authorPoints ?? 0}`}
+              value={
+                clue.bumpPoints > 0
+                  ? `+${(clue.authorPoints ?? 0) + clue.bumpPoints}`
+                  : `+${clue.authorPoints ?? 0}`
+              }
               accent
+              note={clue.bumpPoints > 0 ? `includes 👏 +${clue.bumpPoints}` : undefined}
             />
           </div>
           <div className="text-center font-mono text-xs uppercase tracking-[2px] text-cyan">
@@ -74,12 +84,62 @@ export function RevealScreen({ view }: { view: RoomView }) {
   );
 }
 
+/**
+ * Applause, and the only scoring input the room has after the buzzer. Open to
+ * everyone here (not just solvers) because the answer is out — nobody can be
+ * tipped off by a bump any more.
+ */
+function BumpButton({ clue, onBump }: { clue: ActiveClueView; onBump: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onBump}
+      disabled={!clue.youCanBump}
+      className={cn(
+        'inline-flex items-center gap-2 rounded-pill border-[2.5px] px-3 py-1.5 font-display text-sm font-extrabold transition-all',
+        'hover:-translate-y-0.5 disabled:pointer-events-none',
+        clue.youBumped
+          ? 'border-outline bg-gold text-outline shadow-sticker-sm'
+          : 'border-gold text-gold hover:bg-gold hover:text-outline',
+      )}
+    >
+      👏 {clue.youBumped ? 'bumped' : 'bump'}
+      {clue.bumps > 0 && <span className="font-mono text-xs opacity-80">×{clue.bumps}</span>}
+    </button>
+  );
+}
+
+/** What the solvers were saying while everyone else was still stuck. */
+function ChatRecap({ messages }: { messages: ChatMessage[] }) {
+  return (
+    <div className="mt-5 text-left">
+      <Eyebrow className="mb-2 text-cyan">From the solvers</Eyebrow>
+      <div className="max-h-40 space-y-1.5 overflow-y-auto">
+        {messages.map((m) => (
+          <div
+            key={m.id}
+            className="flex items-start gap-2 rounded-tile border-l-[3px] border-cyan bg-cyan/10 px-3 py-1.5 text-sm"
+          >
+            <span className="text-base leading-tight">{m.avatar}</span>
+            <span className="font-semibold text-cyan">{m.playerName}</span>
+            <span className="flex-1 break-words text-text-2">{m.text}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PointsCard({ clue }: { clue: ActiveClueView }) {
   let line: string;
   if (clue.yourSolve) {
     line = `you guessed ${ordinal(clue.yourSolve.rank)} · ${secs(clue.yourSolve.ms)} · +${clue.yourSolve.points} pts`;
   } else if (clue.youAreAuthor) {
-    line = `your clue earned +${clue.authorPoints ?? 0} pts`;
+    const earned = (clue.authorPoints ?? 0) + clue.bumpPoints;
+    line =
+      clue.bumps > 0
+        ? `your clue earned +${earned} pts · ${clue.bumps} 👏`
+        : `your clue earned +${earned} pts`;
   } else {
     line = "you didn't get this one 😬";
   }
@@ -90,13 +150,24 @@ function PointsCard({ clue }: { clue: ActiveClueView }) {
   );
 }
 
-function Stat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function Stat({
+  label,
+  value,
+  accent,
+  note,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+  note?: string;
+}) {
   return (
     <Panel className="p-3">
       <div className="font-mono text-[10px] uppercase tracking-[2px] text-muted">{label}</div>
       <div className={cn('mt-1 font-display font-extrabold', accent ? 'text-gold' : 'text-paper')}>
         {value}
       </div>
+      {note && <div className="mt-0.5 font-mono text-[10px] text-muted-3">{note}</div>}
     </Panel>
   );
 }

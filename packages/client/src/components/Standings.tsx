@@ -18,7 +18,9 @@ export function Standings({
     <ol className="space-y-2">
       {rows.map((r) => {
         const isYou = r.playerId === myId;
-        const delta = r.guesserPoints + r.authorPoints;
+        // Prompt swaps are charged against the round, so the delta has to
+        // net them out or it won't match the score beside it.
+        const delta = r.guesserPoints + r.authorPoints - r.penaltyPoints;
         return (
           <li
             key={r.playerId}
@@ -35,9 +37,14 @@ export function Standings({
               {r.displayName}
               {isYou && <span className="ml-1 text-xs text-muted">(you)</span>}
             </span>
-            {showDelta && delta > 0 && (
-              <span className="rounded-pill bg-mint/20 px-2 py-0.5 font-mono text-xs font-bold text-mint">
-                ▲ +{delta}
+            {showDelta && delta !== 0 && (
+              <span
+                className={cn(
+                  'rounded-pill px-2 py-0.5 font-mono text-xs font-bold',
+                  delta > 0 ? 'bg-mint/20 text-mint' : 'bg-coral/20 text-coral',
+                )}
+              >
+                {delta > 0 ? `▲ +${delta}` : `▼ ${delta}`}
               </span>
             )}
             <span className="font-mono text-lg text-gold">{r.totalScore.toLocaleString()}</span>

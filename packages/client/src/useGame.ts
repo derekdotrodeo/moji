@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  ChatMessage,
   ConfigureRoomPayload,
   GuessResult,
   JoinRoomResult,
@@ -13,6 +14,8 @@ export interface GameClient {
   connected: boolean;
   view: RoomView | null;
   feed: PublicGuess[];
+  /** The solvers' side channel for the active clue; empty until we can see it. */
+  chat: ChatMessage[];
   /** Letter blanks for the active clue, filling in during GUESSING. */
   hint: string | null;
   error: string | null;
@@ -25,6 +28,8 @@ export interface GameClient {
   leave(): Promise<void>;
   submitClue(emojis: string[]): Promise<void>;
   submitGuess(text: string): Promise<GuessResult>;
+  bump(): Promise<void>;
+  sendChat(text: string): Promise<void>;
   skip(): Promise<void>;
   next(): Promise<void>;
   clearError(): void;
@@ -34,6 +39,7 @@ export function useGame(): GameClient {
   const [connected, setConnected] = useState(socket.connected);
   const [view, setView] = useState<RoomView | null>(null);
   const [feed, setFeed] = useState<PublicGuess[]>([]);
+  const [chat, setChat] = useState<ChatMessage[]>([]);
   const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [myId, setMyId] = useState<string | null>(null);
@@ -48,8 +54,12 @@ export function useGame(): GameClient {
       if (author !== activeAuthorRef.current) {
         activeAuthorRef.current = author;
         setFeed([]);
+        setChat(next.clueChat);
         setHint(next.activeClue?.hint ?? null);
       } else {
+        // The snapshot is authoritative for chat: it is empty until we're
+        // entitled to it, then arrives whole (on solving, or on the reveal).
+        setChat(next.clueChat);
         // Same clue: keep what the tick stream gave us, but pick up the mask
         // from the snapshot when we don't have one yet (guessing just opened,
         // or we reconnected mid-clue).
@@ -58,6 +68,8 @@ export function useGame(): GameClient {
       setView(next);
     };
     const onGuess = (g: PublicGuess) => setFeed((f) => [...f, g].slice(-100));
+    const onChat = (m: ChatMessage) =>
+      setChat((c) => (c.some((x) => x.id === m.id) ? c : [...c, m].slice(-100)));
     const onHint = (h: string) => setHint(h);
     const onError = (msg: string) => setError(msg);
 
@@ -66,6 +78,7 @@ export function useGame(): GameClient {
     socket.on('room:state', onState);
     socket.on('guess:new', onGuess);
     socket.on('clue:hint', onHint);
+    socket.on('chat:new', onChat);
     socket.on('error', onError);
     return () => {
       socket.off('connect', onConnect);
@@ -73,6 +86,7 @@ export function useGame(): GameClient {
       socket.off('room:state', onState);
       socket.off('guess:new', onGuess);
       socket.off('clue:hint', onHint);
+      socket.off('chat:new', onChat);
       socket.off('error', onError);
     };
   }, []);
@@ -108,6 +122,7 @@ export function useGame(): GameClient {
     clearToken();
     setMyId(null);
     setFeed([]);
+    setChat([]);
     setView(null);
   }, []);
   const submitClue = useCallback<GameClient['submitClue']>(
@@ -118,6 +133,11 @@ export function useGame(): GameClient {
     (text) => emitAck<GuessResult>('guess:submit', { text }),
     [],
   );
+  const bump = useCallback<GameClient['bump']>(() => emitAck('clue:bump'), []);
+  const sendChat = useCallback<GameClient['sendChat']>(
+    (text) => emitAck('clue:chat', { text }),
+    [],
+  );
   const skip = useCallback<GameClient['skip']>(() => emitAck('host:skip'), []);
   const next = useCallback<GameClient['next']>(() => emitAck('host:next'), []);
   const clearError = useCallback(() => setError(null), []);
@@ -126,6 +146,7 @@ export function useGame(): GameClient {
     connected,
     view,
     feed,
+    chat,
     hint,
     error,
     myId,
@@ -137,6 +158,8 @@ export function useGame(): GameClient {
     leave,
     submitClue,
     submitGuess,
+    bump,
+    sendChat,
     skip,
     next,
     clearError,
