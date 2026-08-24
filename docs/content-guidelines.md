@@ -5,7 +5,7 @@ How Moji's prompts are stored, and — more importantly — what makes a prompt 
 ## Where content lives
 
 `packages/server/src/content/database/prompt-database.ts` is the **source of truth**: one curated
-array (`PROMPT_DATABASE`, ~923 entries) that everything else derives from.
+array (`PROMPT_DATABASE`, ~1000 entries) that everything else derives from.
 
 - `content/seedData.ts` groups it into the selectable lobby packs.
 - `db/seedDatabase.ts` inserts/reconciles it into Postgres (`npm run db:seed`).
@@ -21,7 +21,7 @@ Add or edit content by editing the database file and re-seeding. Never hand-writ
 |---|---|
 | `answer` | The canonical answer text. |
 | `aliases` | Accepted alternates — short forms, alt spellings, US/UK titles. These become accepted guesses (`game/guessMatching.ts` matches the whole answer or a curated alias). |
-| `umbrella` | `Screen` \| `Stories` \| `Pop Culture` — the **selectable lobby pack**. Dealing happens at this level. |
+| `umbrella` | `Screen` \| `Stories` \| `Pop Culture` \| `Video Games` — the **selectable lobby pack**. Dealing happens at this level. |
 | `category` | The leaf ("Animated TV", "Fairy Tales", "Disney"). Metadata for curation only; unused in gameplay. |
 | `difficulty` | 1–5. |
 | `recognition` | 1–10 — will the room know it? |
@@ -30,7 +30,12 @@ Add or edit content by editing the database file and re-seeding. Never hand-writ
 | `total` | Sum of the three 1–10 scores. The array is sorted by `total` desc, tie-broken by `recognition`. |
 
 Current umbrellas: **Screen** (movies + TV), **Stories** (novels, children's books, theater, fairy
-tales, nursery rhymes), **Pop Culture** (Disney + superheroes).
+tales, nursery rhymes), **Pop Culture** (Disney + superheroes), **Video Games** (consoles, arcades,
+mobile, indies).
+
+Adding an umbrella takes three edits: the `Umbrella` union in the database file, an entry in
+`seedData.ts`, and a pack emoji in `ContentProvider.ts`. The lobby renders packs from `view.packs`,
+so no client change is needed.
 
 ## What makes a good prompt
 
@@ -48,6 +53,10 @@ so two authors given the same prompt produce visibly different clues. That's `mu
 
 **Expressible.** It still has to be buildable from the emoji set. That's `emoji`.
 
+Aliases only need forms that survive `normalize()` in `game/guessMatching.ts` — it lowercases,
+strips diacritics, drops articles (`the/a/an/of/and`), and turns punctuation into spaces, then
+allows a length-scaled edit distance. "Pacman" for "Pac-Man" is wasted; "GTA" and "FNAF" are not.
+
 ### Rejecting whole categories: the FOOD example
 
 **FOOD is excluded as a category**, and the reason generalizes. Too many foods have a literal emoji
@@ -64,4 +73,8 @@ rather than filtering entry by entry. It's cheaper, and it keeps the pack's char
 3. Add aliases for every form a player might reasonably type.
 4. For a proposed new category or umbrella, sample it first — if literal-emoji answers are common
    inside the sample, reject the category.
-5. Keep the array sorted by `total` desc, then `recognition` desc.
+5. Skip franchise entries whose obvious guess is the parent title. "Breath of the Wild" marks a
+   player typing "Zelda" wrong, which punishes the room for knowing the answer.
+6. Check the title isn't already in the database under another umbrella — plenty of games are also
+   films. One entry per title; leave it where it is unless you mean to move it.
+7. Keep the array sorted by `total` desc, then `recognition` desc.

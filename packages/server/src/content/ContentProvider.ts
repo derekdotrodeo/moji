@@ -16,6 +16,7 @@ const PACK_EMOJI: Record<string, string> = {
   screen: '🎬',
   stories: '📚',
   pop_culture: '🦸',
+  video_games: '🎮',
 };
 
 export interface PromptForPlay {

@@ -37,6 +37,12 @@ const UMBRELLAS: { slug: string; name: string; umbrella: Umbrella; description: 
     umbrella: 'Pop Culture',
     description: 'Disney and superheroes.',
   },
+  {
+    slug: 'video_games',
+    name: 'Video Games',
+    umbrella: 'Video Games',
+    description: 'Consoles, arcades, mobile, and indies.',
+  },
 ];
 
 function buildCategories(): SeedCategory[] {
