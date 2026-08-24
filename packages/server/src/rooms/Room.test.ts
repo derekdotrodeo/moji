@@ -30,6 +30,7 @@ const fakeContent = {
 const noopHooks: RoomHooks = {
   onStateChange: () => {},
   onGuess: () => {},
+  onHint: () => {},
   onClosed: () => {},
 };
 
@@ -40,6 +41,24 @@ function newRoom(): Room {
     rng: () => 0.5,
     hooks: noopHooks,
   });
+}
+
+/** Drives a fresh room to the first clue's GUESSING phase. */
+function roomAtGuessing(hooks: RoomHooks = noopHooks): { room: Room; a: Player; b: Player } {
+  const room = new Room('ABCD', {
+    content: fakeContent,
+    scoring: DEFAULT_SCORING,
+    rng: () => 0.5,
+    hooks,
+  });
+  const a = room.addPlayer('Alice', 'player');
+  const b = room.addPlayer('Bob', 'player');
+  room.start(a.id);
+  vi.advanceTimersByTime(2000 + 3100);
+  room.submitClue(a.id, ['🚢', '🧊']);
+  room.submitClue(b.id, ['🍕']);
+  vi.advanceTimersByTime(1500);
+  return { room, a, b };
 }
 
 function scoreOf(room: Room, id: string): number {
@@ -336,5 +355,79 @@ describe('Room host migration', () => {
     const snap = room.getSnapshot();
     expect(snap.hostId).toBe(b.id);
     expect(snap.players.find((p) => p.id === b.id)?.isHost).toBe(true);
+  });
+});
+
+describe('Room letter hints', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('starts fully blanked and holds for the initial delay', () => {
+    const { room, b } = roomAtGuessing();
+    expect(room.phase).toBe('GUESSING');
+    // "Titanic" -> seven blanks, nothing given away yet
+    expect(serializeRoomFor(room.getSnapshot(), b.id).activeClue?.hint).toBe('_______');
+
+    vi.advanceTimersByTime(4_900);
+    expect(serializeRoomFor(room.getSnapshot(), b.id).activeClue?.hint).toBe('_______');
+  });
+
+  it('pushes each letter as it lands, and stops at 75%', () => {
+    const hints: string[] = [];
+    const { room, b } = roomAtGuessing({
+      onStateChange: () => {},
+      onGuess: () => {},
+      onHint: (_r, hint) => hints.push(hint),
+      onClosed: () => {},
+    });
+
+    vi.advanceTimersByTime(30_000); // the whole guess window
+
+    // 7 letters -> floor(7 * 0.75) = 5 reveals, one event each
+    expect(hints).toHaveLength(5);
+    expect(hints[0]!.replace(/[^_]/g, '')).toHaveLength(6); // one letter shown
+    const last = hints[hints.length - 1]!;
+    expect(last.replace(/[^_]/g, '')).toHaveLength(2); // two still hidden
+    expect(last).not.toBe('Titanic');
+    // every step reveals exactly one more letter than the one before it
+    const shown = hints.map((h) => 7 - h.replace(/[^_]/g, '').length);
+    expect(shown).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('never leaks the answer to a non-author, hint or not', () => {
+    const { room, a, b } = roomAtGuessing();
+    vi.advanceTimersByTime(29_000);
+    const view = serializeRoomFor(room.getSnapshot(), b.id).activeClue!;
+    expect(view.answer).toBeNull();
+    expect(view.hint).not.toBe('Titanic');
+    expect(view.hint).toContain('_');
+    // the author still sees their own answer
+    expect(serializeRoomFor(room.getSnapshot(), a.id).activeClue?.answer).toBe('Titanic');
+  });
+
+  it('drops the hint once the clue resolves', () => {
+    const { room, b } = roomAtGuessing();
+    room.submitGuess(b.id, 'Titanic'); // everyone solved -> CLUE_SCORING
+    expect(room.phase).toBe('CLUE_SCORING');
+    expect(serializeRoomFor(room.getSnapshot(), b.id).activeClue?.hint).toBeNull();
+  });
+
+  it('cancels the pending ticks when a clue resolves early', () => {
+    const hints: string[] = [];
+    const { room, b } = roomAtGuessing({
+      onStateChange: () => {},
+      onGuess: () => {},
+      onHint: (_r, hint) => hints.push(hint),
+      onClosed: () => {},
+    });
+    vi.advanceTimersByTime(6_000); // one letter has dropped
+    expect(hints).toHaveLength(1);
+    room.submitGuess(b.id, 'Titanic'); // everyone solved -> CLUE_SCORING
+    vi.advanceTimersByTime(30_000);
+
+    // Titanic had four ticks still pending; none of them fire. The only later
+    // hints belong to the next clue ("Pizza" -> 5 letters -> 3 reveals).
+    expect(hints.filter((h) => h.length === 'Titanic'.length)).toHaveLength(1);
+    expect(hints.filter((h) => h.length === 'Pizza'.length)).toHaveLength(3);
   });
 });

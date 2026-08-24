@@ -46,6 +46,7 @@ export function serializeRoomFor(snap: RoomSnapshot, recipientId: string): RoomV
           authorAvatar: snap.active.authorAvatar,
           emojis: snap.active.emojis,
           answer: activeAnswer,
+          hint: snap.active.hint,
           solvedCount: snap.active.solvedCount,
           eligibleCount: snap.active.eligibleCount,
           youAreAuthor,

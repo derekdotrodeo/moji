@@ -69,6 +69,11 @@ export interface ServerToClientEvents {
   'room:state': (view: RoomView) => void;
   /** A new guess landed on the active clue (for everyone's live feed). */
   'guess:new': (guess: PublicGuess) => void;
+  /**
+   * One more letter of the answer just dropped. Carries the whole mask as it
+   * now stands, so a client that missed a tick still lands in the right place.
+   */
+  'clue:hint': (hint: string) => void;
   /** Host changed (e.g. migration). */
   'host:changed': (hostId: string) => void;
   /** Recoverable/informational error not tied to a specific command ack. */

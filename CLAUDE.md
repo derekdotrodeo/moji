@@ -22,6 +22,10 @@ Break these only on purpose.
   client for instant feedback *and* on the server as the authoritative backstop against pasted or
   tampered input. 1–10 emoji; no number emoji when the answer contains a digit; no spelling out
   the answer.
+- **Letter hints are computed server-side and pushed one step at a time.**
+  `shared/hints.ts` plans which letters drop when; `Room` ticks the schedule and emits `clue:hint`
+  with the mask as it currently stands. The plan and the answer never leave the server, and the
+  reveal fraction is floored so the mask can never become the answer.
 - **Game phases:** LOBBY → ROUND_INTRO → PROMPT_ASSIGNMENT → CLUE_CREATION → CLUE_REVEAL →
   GUESSING → CLUE_SCORING → ROUND_RESULTS → GAME_RESULTS → ROOM_CLOSED (`packages/shared/src/types.ts`).
 - **Defaults:** 3 rounds, 60s clue creation, 30s guessing (`DEFAULT_ROOM_CONFIG`). Three rounds is a

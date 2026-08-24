@@ -44,6 +44,7 @@ function snapshot(phase: GamePhase): RoomSnapshot {
       eligibleCount: 1,
       solves: [],
       authorPoints: null,
+      hint: null,
     },
     guessFeed: [],
     roundResults: null,

@@ -53,6 +53,8 @@ export function GuessScreen({ game, view }: { game: GameClient; view: RoomView }
           ))}
         </div>
 
+        {!clue.youAreAuthor && guessing && game.hint && <HintBlanks hint={game.hint} />}
+
         {clue.youAreAuthor ? (
           <p className="mt-8 text-muted">
             This is your clue — sit back and watch the chaos 🍿
@@ -85,6 +87,46 @@ export function GuessScreen({ game, view }: { game: GameClient; view: RoomView }
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+/** Letters and digits are the only characters a hint hides. */
+const MASKABLE = /[\p{L}\p{N}]/u;
+
+/**
+ * The answer as blanks, filling in letter by letter while the clock runs.
+ * Words stay together so a title never breaks mid-word; punctuation is shown
+ * from the start and styled down, since it's structure rather than a gift.
+ */
+function HintBlanks({ hint }: { hint: string }) {
+  return (
+    <div
+      className="mt-7 flex flex-wrap items-end justify-center gap-x-5 gap-y-2"
+      role="status"
+      aria-label={`Answer so far: ${hint.replace(/_/g, ' blank ')}`}
+    >
+      {hint.split(' ').map((word, w) => (
+        <div key={w} className="flex gap-1" aria-hidden="true">
+          {[...word].map((ch, i) => {
+            const blank = ch === '_';
+            const letter = MASKABLE.test(ch);
+            return (
+              <span
+                key={i}
+                className={cn(
+                  'flex h-9 w-6 items-center justify-center font-mono text-2xl font-bold uppercase sm:w-7',
+                  blank && 'border-b-[3px] border-muted-5',
+                  letter && !blank && 'animate-moji-pop border-b-[3px] border-lime text-lime',
+                  !letter && 'text-muted-3',
+                )}
+              >
+                {blank ? '' : ch}
+              </span>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }

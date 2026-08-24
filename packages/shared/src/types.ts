@@ -151,6 +151,12 @@ export interface ActiveClueView {
   emojis: string[];
   /** Revealed only once the clue resolves (CLUE_SCORING) or to the author. */
   answer: string | null;
+  /**
+   * Letter blanks for the answer, filling in as the guess window runs
+   * (see shared/hints.ts). Null outside GUESSING. Safe to send to everyone:
+   * it is capped short of the whole answer, so it never spells it out.
+   */
+  hint: string | null;
   solvedCount: number;
   eligibleCount: number;
   /** Whether the recipient is the author (and therefore cannot guess). */

@@ -148,6 +148,11 @@ export class RoomManager implements RoomHooks {
     this.broadcaster.toRoom(room.code, 'guess:new', guess);
   }
 
+  onHint(room: Room, hint: string): void {
+    // Public-safe: the mask is always short of the full answer.
+    this.broadcaster.toRoom(room.code, 'clue:hint', hint);
+  }
+
   onClosed(room: Room): void {
     this.persistedGames.delete(room.code);
     this.store.delete(room.code);

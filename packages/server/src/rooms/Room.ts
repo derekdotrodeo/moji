@@ -14,12 +14,15 @@ import {
   DEFAULT_ROOM_CONFIG,
   authorPoints,
   guesserPoints,
+  planHintReveal,
+  renderHint,
   promptHasNumber,
   validateClue,
   type ClueSolve,
   type ConfigureRoomPayload,
   type GamePhase,
   type GuessResult,
+  type HintPlan,
   type Pack,
   type Player,
   type PlayerRole,
@@ -44,6 +47,8 @@ const GUESS_MIN_INTERVAL_MS = 500;
 export interface RoomHooks {
   onStateChange(room: Room): void;
   onGuess(room: Room, guess: PublicGuess): void;
+  /** One more letter of the active clue's answer became visible. */
+  onHint(room: Room, hint: string): void;
   onClosed(room: Room): void;
 }
 
@@ -73,6 +78,10 @@ interface ActiveClue {
   solveCounter: number;
   solvers: Map<string, SolveRecord>; // guesserId -> solve record
   authorPoints: number | null; // set at CLUE_SCORING
+  /** Which letters drop when, planned once at the top of the guess window. */
+  hint: HintPlan | null;
+  /** How many of `hint.order` have been revealed so far. */
+  hintShown: number;
 }
 
 /** Read-only projection consumed by the role-filtered serializer. */
@@ -101,6 +110,8 @@ export interface RoomSnapshot {
     eligibleCount: number;
     solves: ClueSolve[];
     authorPoints: number | null;
+    /** Letter blanks as they stand right now; null outside GUESSING. */
+    hint: string | null;
   } | null;
   guessFeed: PublicGuess[];
   roundResults: ScoreRow[] | null;
@@ -130,6 +141,8 @@ export class Room {
   private roundResults: ScoreRow[] | null = null;
   private gameResults: ScoreRow[] | null = null;
   private timer: NodeJS.Timeout | null = null;
+  /** Separate from `timer`: hint ticks run *inside* the guess phase. */
+  private hintTimer: NodeJS.Timeout | null = null;
 
   constructor(code: string, private readonly deps: RoomDeps) {
     this.code = code;
@@ -426,7 +439,15 @@ export class Room {
       return;
     }
     const authorId = this.playOrder[this.playIndex]!;
-    this.active = { authorId, revealAt: 0, solveCounter: 0, solvers: new Map(), authorPoints: null };
+    this.active = {
+      authorId,
+      revealAt: 0,
+      solveCounter: 0,
+      solvers: new Map(),
+      authorPoints: null,
+      hint: null,
+      hintShown: 0,
+    };
     for (const p of this.players.values()) p.guessedThisClue = new Set();
     this.transition('CLUE_REVEAL', CLUE_REVEAL_MS, () => this.startGuessing());
   }
@@ -440,6 +461,53 @@ export class Room {
     }
     if (this.active) this.active.revealAt = Date.now();
     this.transition('GUESSING', this.config.guessingSeconds * 1000, () => this.endGuessing());
+    this.startHintReveal(); // after transition(), which clears any previous ticks
+  }
+
+  // ── letter hints ──────────────────────────────────────────────────────────
+
+  /**
+   * Plan the reveal for this clue and start ticking. The plan stays server-side;
+   * clients only ever receive the mask as it currently stands.
+   */
+  private startHintReveal(): void {
+    const clue = this.active;
+    if (!clue) return;
+    const answer = this.assignments.get(clue.authorId)?.answer ?? '';
+    clue.hint = planHintReveal(answer, this.config.guessingSeconds * 1000, this.deps.rng);
+    clue.hintShown = 0;
+    this.scheduleHintTick();
+  }
+
+  private scheduleHintTick(): void {
+    const clue = this.active;
+    const at = clue?.hint?.times[clue.hintShown];
+    if (!clue || at === undefined) return;
+    const delay = Math.max(0, clue.revealAt + at - Date.now());
+    this.hintTimer = setTimeout(() => {
+      this.hintTimer = null;
+      // The clue may have resolved early (everyone solved it, host skipped).
+      if (this.phase !== 'GUESSING' || this.active !== clue) return;
+      clue.hintShown += 1;
+      const hint = this.currentHint();
+      if (hint) this.deps.hooks.onHint(this, hint);
+      this.scheduleHintTick();
+    }, delay);
+  }
+
+  /** The mask as it stands right now — blanks plus whatever has been revealed. */
+  private currentHint(): string | null {
+    if (!this.active || this.phase !== 'GUESSING') return null;
+    const answer = this.assignments.get(this.active.authorId)?.answer ?? '';
+    if (!answer) return null;
+    return renderHint(answer, this.active.hint?.order.slice(0, this.active.hintShown) ?? []);
+  }
+
+  private clearHintTimer(): void {
+    if (this.hintTimer) {
+      clearTimeout(this.hintTimer);
+      this.hintTimer = null;
+    }
   }
 
   private endGuessing(): void {
@@ -483,6 +551,7 @@ export class Room {
 
   private close(): void {
     this.clearTimer();
+    this.clearHintTimer();
     this.phase = 'ROOM_CLOSED';
     this.deps.hooks.onClosed(this);
   }
@@ -494,6 +563,7 @@ export class Room {
     onExpire: (() => void) | null,
   ): void {
     this.clearTimer();
+    this.clearHintTimer();
     this.phase = phase;
     this.version += 1;
     this.deadlineTs = durationMs ? Date.now() + durationMs : null;
@@ -590,6 +660,7 @@ export class Room {
         eligibleCount: this.eligibleGuessers(),
         solves: this.buildSolves(this.active),
         authorPoints: this.active.authorPoints,
+        hint: this.currentHint(),
       };
     }
 

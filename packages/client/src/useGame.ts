@@ -13,6 +13,8 @@ export interface GameClient {
   connected: boolean;
   view: RoomView | null;
   feed: PublicGuess[];
+  /** Letter blanks for the active clue, filling in during GUESSING. */
+  hint: string | null;
   error: string | null;
   myId: string | null;
   join(displayName: string, avatar: string, code?: string): Promise<JoinRoomResult>;
@@ -32,6 +34,7 @@ export function useGame(): GameClient {
   const [connected, setConnected] = useState(socket.connected);
   const [view, setView] = useState<RoomView | null>(null);
   const [feed, setFeed] = useState<PublicGuess[]>([]);
+  const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [myId, setMyId] = useState<string | null>(null);
   const activeAuthorRef = useRef<string | null>(null);
@@ -45,22 +48,31 @@ export function useGame(): GameClient {
       if (author !== activeAuthorRef.current) {
         activeAuthorRef.current = author;
         setFeed([]);
+        setHint(next.activeClue?.hint ?? null);
+      } else {
+        // Same clue: keep what the tick stream gave us, but pick up the mask
+        // from the snapshot when we don't have one yet (guessing just opened,
+        // or we reconnected mid-clue).
+        setHint((cur) => cur ?? next.activeClue?.hint ?? null);
       }
       setView(next);
     };
     const onGuess = (g: PublicGuess) => setFeed((f) => [...f, g].slice(-100));
+    const onHint = (h: string) => setHint(h);
     const onError = (msg: string) => setError(msg);
 
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('room:state', onState);
     socket.on('guess:new', onGuess);
+    socket.on('clue:hint', onHint);
     socket.on('error', onError);
     return () => {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
       socket.off('room:state', onState);
       socket.off('guess:new', onGuess);
+      socket.off('clue:hint', onHint);
       socket.off('error', onError);
     };
   }, []);
@@ -114,6 +126,7 @@ export function useGame(): GameClient {
     connected,
     view,
     feed,
+    hint,
     error,
     myId,
     join,
