@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type UIEvent } from 'react';
 import type { PublicGuess, RoomView } from '@moji/shared';
 import type { GameClient } from '../useGame.js';
 import { TimerRing } from '../components/TimerRing.js';
@@ -119,6 +119,9 @@ function ScoresRail({ view, myId }: { view: RoomView; myId: string | null }) {
   );
 }
 
+/** How close to the bottom still counts as "following along". */
+const NEAR_BOTTOM_PX = 48;
+
 function GuessFeed({
   feed,
   myId,
@@ -128,42 +131,77 @@ function GuessFeed({
   myId: string | null;
   avatarOf: (id: string) => string;
 }) {
-  const rows = [...feed].reverse();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [pinned, setPinned] = useState(true);
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    setPinned(true);
+  }, []);
+
+  // Oldest at the top, newest at the bottom by the input (chat convention).
+  // Follow the newest guess automatically, but don't yank a player who has
+  // scrolled up to read — they get a "jump to newest" pill instead.
+  useEffect(() => {
+    if (feed.length === 0) {
+      setPinned(true); // new clue: the feed resets, so start following again
+      return;
+    }
+    if (pinned) scrollToBottom();
+  }, [feed.length, pinned, scrollToBottom]);
+
+  const onScroll = (e: UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    setPinned(el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX);
+  };
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto p-3">
-      {/* column-reverse keeps newest pinned to the bottom near the input */}
-      {rows.length === 0 ? (
-        <div className="py-8 text-center text-muted">be the first to guess… ⚡</div>
-      ) : (
-        <div className="space-y-1.5">
-          {rows.map((g) => {
-            const mine = g.guesserId === myId;
-            return (
-              <div
-                key={g.id}
-                className={cn(
-                  'flex items-center gap-2 rounded-tile px-3 py-1.5 text-sm',
-                  g.isCorrect ? 'bg-mint font-semibold text-outline' : 'bg-inset',
-                )}
-              >
-                <span className="text-lg">{avatarOf(g.guesserId)}</span>
-                <span className={cn('font-semibold', mine && !g.isCorrect && 'text-gold')}>
-                  {g.guesserName}
-                </span>
-                {g.isCorrect ? (
-                  <>
-                    <span className="flex-1">guessed it!</span>
-                    <span className="rounded-pill bg-outline px-2 py-0.5 font-mono text-xs text-mint">
-                      +{g.points}
-                    </span>
-                  </>
-                ) : (
-                  <span className="flex-1 text-text-2">{g.text}</span>
-                )}
-              </div>
-            );
-          })}
-        </div>
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto p-3">
+        {feed.length === 0 ? (
+          <div className="py-8 text-center text-muted">be the first to guess… ⚡</div>
+        ) : (
+          <div className="space-y-1.5">
+            {feed.map((g) => {
+              const mine = g.guesserId === myId;
+              return (
+                <div
+                  key={g.id}
+                  className={cn(
+                    'flex items-center gap-2 rounded-tile px-3 py-1.5 text-sm',
+                    g.isCorrect ? 'bg-mint font-semibold text-outline' : 'bg-inset',
+                  )}
+                >
+                  <span className="text-lg">{avatarOf(g.guesserId)}</span>
+                  <span className={cn('font-semibold', mine && !g.isCorrect && 'text-gold')}>
+                    {g.guesserName}
+                  </span>
+                  {g.isCorrect ? (
+                    <>
+                      <span className="flex-1">guessed it!</span>
+                      <span className="rounded-pill bg-outline px-2 py-0.5 font-mono text-xs text-mint">
+                        +{g.points}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="flex-1 text-text-2">{g.text}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {!pinned && feed.length > 0 && (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          className="absolute inset-x-0 bottom-2 mx-auto w-max rounded-pill border-2 border-outline bg-cyan px-3 py-1 font-display text-xs font-extrabold text-outline shadow-sticker-sm"
+        >
+          newest ↓
+        </button>
       )}
     </div>
   );
