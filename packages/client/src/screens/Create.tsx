@@ -1,4 +1,10 @@
-import { useEffect, useState } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { MAX_EMOJIS, type RoomView } from '@moji/shared';
 import type { GameClient } from '../useGame.js';
 import { EMOJI_CATS, type EmojiCat, type EmojiData, loadEmojiData } from '../data/emoji.js';
@@ -22,6 +28,15 @@ export function ClueScreen({ game, view }: { game: GameClient; view: RoomView })
 
   const add = (e: string) => !atCap && setEmojis((cur) => [...cur, e]);
   const removeAt = (i: number) => setEmojis((cur) => cur.filter((_, idx) => idx !== i));
+  const move = (from: number, to: number) =>
+    setEmojis((cur) => {
+      if (from === to || to < 0 || to >= cur.length) return cur;
+      const next = [...cur];
+      const [tile] = next.splice(from, 1);
+      if (tile === undefined) return cur;
+      next.splice(to, 0, tile);
+      return next;
+    });
 
   const submit = async () => {
     if (emojis.length === 0 || busy) return;
@@ -68,18 +83,7 @@ export function ClueScreen({ game, view }: { game: GameClient; view: RoomView })
                 tap emoji below to build your clue… (up to {MAX_EMOJIS})
               </div>
             ) : (
-              <div className="grid grid-cols-5 gap-2">
-                {emojis.map((e, i) => (
-                  <button
-                    key={`${e}-${i}`}
-                    onClick={() => removeAt(i)}
-                    title="tap to remove"
-                    className="flex aspect-square animate-moji-tilebob items-center justify-center rounded-tile border-[2.5px] border-outline bg-paper text-3xl shadow-sticker-sm"
-                  >
-                    {e}
-                  </button>
-                ))}
-              </div>
+              <ClueTray emojis={emojis} onMove={move} onRemove={removeAt} />
             )}
           </div>
           <div
@@ -92,6 +96,11 @@ export function ClueScreen({ game, view }: { game: GameClient; view: RoomView })
               ? `Max ${MAX_EMOJIS} emoji · ${emojis.length}/${MAX_EMOJIS}`
               : `Your clue · ${emojis.length}/${MAX_EMOJIS}${emojis.length > 0 ? ' ✓' : ''}`}
           </div>
+          {emojis.length > 1 && (
+            <div className="font-mono text-xs uppercase tracking-[2px] text-muted-3">
+              drag to reorder · tap to remove
+            </div>
+          )}
         </div>
 
         {/* Picker: search + tabs + grid */}
@@ -159,6 +168,160 @@ export function ClueScreen({ game, view }: { game: GameClient; view: RoomView })
           </StickerButton>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Pointer travel (px) that turns a tap into a drag. */
+const DRAG_SLOP_PX = 6;
+
+interface DragState {
+  pointerId: number;
+  /** slot the tile is in right now — updated live as it is dragged past others */
+  index: number;
+  /** where the press started, for the tap-vs-drag decision */
+  startX: number;
+  startY: number;
+  /** offset from the slot centre to the pointer, so the tile tracks the finger */
+  dx: number;
+  dy: number;
+  dragging: boolean;
+}
+
+/**
+ * The clue tray. Tiles reorder by dragging (pointer events, so one code path
+ * covers mouse and touch) and a press that never travels is still a tap to
+ * remove — the gesture players already know from the first playtest.
+ *
+ * Slots are fixed grid cells; only their contents move. Each cell holds an
+ * untransformed wrapper so hit-testing reads true slot rects while the dragged
+ * tile carries a translate.
+ */
+function ClueTray({
+  emojis,
+  onMove,
+  onRemove,
+}: {
+  emojis: string[];
+  onMove: (from: number, to: number) => void;
+  onRemove: (index: number) => void;
+}) {
+  const slots = useRef<(HTMLDivElement | null)[]>([]);
+  const [drag, setDrag] = useState<DragState | null>(null);
+  // Handlers fire between renders, so they read the live drag from a ref.
+  const dragRef = useRef<DragState | null>(null);
+  const setDragState = (next: DragState | null) => {
+    dragRef.current = next;
+    setDrag(next);
+  };
+
+  /** Index of the slot under the pointer, or null when it is outside the tray. */
+  const slotUnder = (x: number, y: number): number | null => {
+    for (let i = 0; i < emojis.length; i++) {
+      const r = slots.current[i]?.getBoundingClientRect();
+      if (r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return i;
+    }
+    return null;
+  };
+
+  const focusSlot = (index: number) =>
+    requestAnimationFrame(() => slots.current[index]?.querySelector('button')?.focus());
+
+  const onPointerDown = (e: ReactPointerEvent<HTMLButtonElement>, index: number) => {
+    if (e.button !== 0) return; // left button / touch / pen only
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragState({
+      pointerId: e.pointerId,
+      index,
+      startX: e.clientX,
+      startY: e.clientY,
+      dx: 0,
+      dy: 0,
+      dragging: false,
+    });
+  };
+
+  const onPointerMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const d = dragRef.current;
+    if (!d || d.pointerId !== e.pointerId) return;
+    const travelled = Math.hypot(e.clientX - d.startX, e.clientY - d.startY);
+    if (!d.dragging && travelled <= DRAG_SLOP_PX) return; // still a tap
+
+    // Reorder as the tile passes over another slot, then re-centre it on the
+    // pointer. Slot rects are positional, so this reads correctly even though
+    // the reorder has not rendered yet.
+    const over = slotUnder(e.clientX, e.clientY);
+    const index = over === null ? d.index : over;
+    if (index !== d.index) onMove(d.index, index);
+
+    const r = slots.current[index]?.getBoundingClientRect();
+    setDragState({
+      ...d,
+      index,
+      dragging: true,
+      dx: r ? e.clientX - (r.left + r.width / 2) : d.dx,
+      dy: r ? e.clientY - (r.top + r.height / 2) : d.dy,
+    });
+  };
+
+  const onPointerUp = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const d = dragRef.current;
+    if (!d || d.pointerId !== e.pointerId) return;
+    setDragState(null);
+    if (!d.dragging) onRemove(d.index); // a press that never travelled
+  };
+
+  const onPointerCancel = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const d = dragRef.current;
+    if (d && d.pointerId === e.pointerId) setDragState(null);
+  };
+
+  // Keyboard equivalent of the drag, for anyone not using a pointer.
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
+    const to = e.key === 'ArrowLeft' ? index - 1 : e.key === 'ArrowRight' ? index + 1 : null;
+    if (to !== null && to >= 0 && to < emojis.length) {
+      e.preventDefault();
+      onMove(index, to);
+      focusSlot(to);
+    } else if (e.key === 'Backspace' || e.key === 'Delete') {
+      e.preventDefault();
+      onRemove(index);
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-5 gap-2">
+      {emojis.map((e, i) => {
+        const held = drag?.dragging && drag.index === i;
+        return (
+          <div
+            key={`${e}-${i}`}
+            ref={(el) => {
+              slots.current[i] = el;
+            }}
+            className={cn('relative aspect-square', held && 'z-10')}
+          >
+            <button
+              onPointerDown={(ev) => onPointerDown(ev, i)}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerCancel}
+              onKeyDown={(ev) => onKeyDown(ev, i)}
+              title="drag to reorder · tap to remove"
+              aria-label={`clue slot ${i + 1}: ${e}. Arrow keys move it, delete removes it.`}
+              style={held ? { transform: `translate(${drag.dx}px, ${drag.dy}px) scale(1.1)` } : undefined}
+              className={cn(
+                'absolute inset-0 flex touch-none select-none items-center justify-center rounded-tile border-[2.5px] border-outline bg-paper text-3xl',
+                held
+                  ? 'cursor-grabbing shadow-sticker-lg'
+                  : 'animate-moji-tilebob cursor-grab shadow-sticker-sm',
+              )}
+            >
+              {e}
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
