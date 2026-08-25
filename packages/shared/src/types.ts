@@ -208,6 +208,22 @@ export interface ActiveClueView {
   yourSolve: ClueSolve | null;
 }
 
+/**
+ * Public counters served at `GET /api/stats` for the landing page.
+ *
+ * Every field is nullable on purpose: the front page must render when the
+ * database is down, and the client hides the line on a null rather than
+ * printing a zero.
+ */
+export interface PublicStats {
+  /** Correct guesses across every completed game. */
+  cluesGuessed: number | null;
+  /** Correct guesses in the last 7 days. */
+  cluesGuessedThisWeek: number | null;
+  /** Completed games, all time. */
+  gamesPlayed: number | null;
+}
+
 export interface ScoreRow {
   playerId: string;
   displayName: string;

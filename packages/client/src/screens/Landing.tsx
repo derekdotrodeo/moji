@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+import type { PublicStats } from '@moji/shared';
 import { Eyebrow, Panel, StickerButton, Wordmark, cn } from '../ui.js';
 
 const FLOATING = ['🦁', '👑', '🌅', '🍕', '🚀', '🎬'];
@@ -9,6 +11,49 @@ const STEPS = [
 ];
 
 const PROOF = ['😎', '🦊', '👽', '🐙', '🤖'];
+
+/**
+ * The real count of correct guesses, or nothing at all.
+ *
+ * This slot used to hold a hardcoded "128,402 clues guessed this week". A made-up
+ * number is the kind of detail that turns a friendly launch thread into a thread
+ * about the developer, so it now reads from /api/stats.
+ *
+ * Two deliberate behaviours: it renders nothing until the number arrives (no
+ * layout jump into a lie), and it renders nothing when the count is zero or the
+ * request fails. A quiet week should show no line, not "0 clues guessed".
+ *
+ * It shows the all-time total rather than the last 7 days, because a game with a
+ * handful of sessions will read "0" most weeks and that is worse than saying
+ * nothing. `cluesGuessedThisWeek` is in the payload — switch the field and the
+ * copy together when the weekly number stops embarrassing itself.
+ */
+function SocialProof() {
+  const [count, setCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    fetch('/api/stats')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: PublicStats | null) => {
+        if (live && typeof data?.cluesGuessed === 'number') setCount(data.cluesGuessed);
+      })
+      .catch(() => {
+        /* the front page must render without this */
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (!count) return null;
+  return (
+    <span className="text-sm text-muted">
+      <b className="text-paper">{count.toLocaleString()}</b>{' '}
+      {count === 1 ? 'clue guessed' : 'clues guessed'} so far
+    </span>
+  );
+}
 
 export function Landing({ onCreate, onJoin }: { onCreate: () => void; onJoin: () => void }) {
   return (
@@ -46,9 +91,7 @@ export function Landing({ onCreate, onJoin }: { onCreate: () => void; onJoin: ()
                 </span>
               ))}
             </div>
-            <span className="text-sm text-muted">
-              <b className="text-paper">128,402</b> clues guessed this week
-            </span>
+            <SocialProof />
           </div>
         </div>
 

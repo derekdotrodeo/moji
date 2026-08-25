@@ -45,6 +45,22 @@ Break these only on purpose.
   `activeClue.answer`, so the two cannot drift: chat is unfiltered player writing that routinely
   contains the answer, and it is fanned out **per-socket** from `RoomManager.onChat`, never
   `toRoom`. If you add a way to see chat, you are adding a way to see the answer.
+- **The server rewrites the HTML shell before serving it.** A room link pasted into a group chat
+  is this game's only marketing surface, so `/r/:code` stamps live Open Graph tags (including the
+  player count) into `index.html` via `server/src/realtime/og.ts`, and `/` gets origin-corrected
+  ones. Two things this depends on, both easy to undo by accident: `express.static` is mounted with
+  `index: false` (otherwise `/` is answered by the static file and never reaches the handler), and
+  the `/r/:code` route is registered *before* the `app.get('*')` catch-all. `og:url`/`og:image` are
+  built from `PUBLIC_ORIGIN`, so a domain move needs no code change — but the literals in
+  `index.html` are the fallback for anything serving that file directly, so keep them on production.
+  The room card is sent `Cache-Control: no-store`: a CDN holding "4 players waiting" for a room that
+  ended an hour ago is worse than no card at all.
+- **Numbers shown to the public must be real, and must be optional.** The landing page counter reads
+  `GET /api/stats` (`server/src/stats.ts`), which is derived from `games.clues_guessed` — written in
+  the same fire-and-forget insert as the rest of the game record. Every field is nullable and the
+  query never throws: a database that is down yields nulls and the client renders nothing. It
+  renders nothing at zero, too. That slot previously held a hardcoded `128,402`, and a fake number
+  on a public site is the kind of detail that turns a launch thread into a thread about the author.
 - **Game phases:** LOBBY → ROUND_INTRO → PROMPT_ASSIGNMENT → CLUE_CREATION → CLUE_REVEAL →
   GUESSING → CLUE_SCORING → ROUND_RESULTS → GAME_RESULTS → ROOM_CLOSED (`packages/shared/src/types.ts`).
 - **Defaults:** 3 rounds, 60s clue creation, 30s guessing, 3 prompt swaps at 150 points each

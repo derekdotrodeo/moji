@@ -140,6 +140,8 @@ export interface RoomSnapshot {
   guessFeed: PublicGuess[];
   roundResults: ScoreRow[] | null;
   gameResults: ScoreRow[] | null;
+  /** Correct guesses across the whole game (for persistence, not for clients). */
+  cluesGuessed: number;
 }
 
 export class Room {
@@ -164,6 +166,8 @@ export class Room {
   private guessFeed: PublicGuess[] = [];
   private roundResults: ScoreRow[] | null = null;
   private gameResults: ScoreRow[] | null = null;
+  /** Correct guesses this game — persisted, and the number the landing page shows. */
+  private cluesGuessed = 0;
   private timer: NodeJS.Timeout | null = null;
   /** Separate from `timer`: hint ticks run *inside* the guess phase. */
   private hintTimer: NodeJS.Timeout | null = null;
@@ -281,6 +285,7 @@ export class Room {
     this.usedPromptKeys.clear();
     this.roundNumber = 0;
     this.gameResults = null;
+    this.cluesGuessed = 0;
     this.beginRound();
   }
 
@@ -388,6 +393,7 @@ export class Room {
       this.active.solvers.set(playerId, { rank: solveRank, ms: elapsedMs, points });
       player.guesserPointsRound += points;
       player.score += points;
+      this.cluesGuessed += 1;
     } else if (env.logGuessMisses) {
       // Tuning data: review these for near-misses the matcher should accept.
       console.log(`[guess-miss] ${this.code} "${text}" != "${prompt.answer}"`);
@@ -829,6 +835,7 @@ export class Room {
       guessFeed: this.guessFeed,
       roundResults: this.roundResults,
       gameResults: this.gameResults,
+      cluesGuessed: this.cluesGuessed,
     };
   }
 }

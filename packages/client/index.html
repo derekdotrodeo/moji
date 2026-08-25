@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Moji — Emoji Clue Party Game</title>
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -11,6 +11,28 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
     <meta name="theme-color" content="#15091f" />
+
+    <!--
+      Link preview. A room link pasted into a group chat is this game's only
+      marketing surface, so these are load-bearing, not decoration.
+
+      og:url and og:image are absolute because crawlers require it. The server
+      rewrites both from PUBLIC_ORIGIN when it serves this shell (see
+      server/src/realtime/og.ts), so a domain change needs no edit here — but
+      the literals below are what a crawler gets if the file is ever served by
+      something other than our server, so keep them pointed at production.
+    -->
+    <meta name="description" content="Explain a movie in ten emoji. Your friends get thirty seconds. A free browser party game for 4-10 players — no app, no signup, just a room code." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Moji" />
+    <meta property="og:url" content="https://moji.derek.rodeo/" />
+    <meta property="og:title" content="Moji — the emoji party game" />
+    <meta property="og:description" content="Explain a movie in ten emoji. Your friends get thirty seconds. Good luck." />
+    <meta property="og:image" content="https://moji.derek.rodeo/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Moji — a clue of five emoji with players racing to guess the movie." />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

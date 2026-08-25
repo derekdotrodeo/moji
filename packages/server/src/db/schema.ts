@@ -81,16 +81,27 @@ export const promptForbiddenTokens = pgTable('prompt_forbidden_tokens', {
 });
 
 // ── Game records (written at/after completion) ──
-export const games = pgTable('games', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  roomCode: text('room_code').notNull(),
-  hostUserId: uuid('host_user_id').references(() => users.id),
-  config: jsonb('config').notNull(),
-  status: text('status').notNull(), // in_progress|completed|abandoned
-  startedAt: timestamp('started_at', { withTimezone: true }),
-  endedAt: timestamp('ended_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const games = pgTable(
+  'games',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    roomCode: text('room_code').notNull(),
+    hostUserId: uuid('host_user_id').references(() => users.id),
+    config: jsonb('config').notNull(),
+    status: text('status').notNull(), // in_progress|completed|abandoned
+    /**
+     * Correct guesses across the whole game — one per player per clue solved.
+     * Denormalized onto the game because it is the counter the landing page
+     * shows, and summing it must not depend on `guesses` (which is not written
+     * yet). Recomputable from `guesses` once that lands.
+     */
+    cluesGuessed: integer('clues_guessed').notNull().default(0),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ byEndedAt: index('games_ended_at_idx').on(t.endedAt) }),
+);
 
 export const gamePlayers = pgTable(
   'game_players',
