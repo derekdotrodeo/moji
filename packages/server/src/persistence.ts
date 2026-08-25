@@ -17,6 +17,7 @@ export async function persistCompletedGame(room: Room): Promise<void> {
       roomCode: snap.code,
       config: snap.config,
       status: 'completed',
+      cluesGuessed: snap.cluesGuessed,
       endedAt: new Date(),
     })
     .returning();

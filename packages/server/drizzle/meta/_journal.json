@@ -8,6 +8,13 @@
       "when": 1781979516602,
       "tag": "0000_hot_eddie_brock",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787622569726,
+      "tag": "0001_outgoing_annihilus",
+      "breakpoints": true
     }
   ]
 }
