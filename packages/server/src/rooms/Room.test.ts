@@ -31,6 +31,7 @@ const noopHooks: RoomHooks = {
   onStateChange: () => {},
   onGuess: () => {},
   onHint: () => {},
+  onChat: () => {},
   onClosed: () => {},
 };
 
@@ -122,13 +123,14 @@ describe('Room state machine', () => {
     const res = room.submitGuess(b.id, 'Titanic');
     expect(res).toMatchObject({ accepted: true, isCorrect: true, solveRank: 1 });
     expect(scoreOf(room, b.id)).toBe(1000); // instant guess -> guesserMax
-    expect(scoreOf(room, a.id)).toBe(130); // author: 1 solver * authorPerSolve
+    // Author: one solver, who got it instantly -> the base rate and no more.
+    expect(scoreOf(room, a.id)).toBe(DEFAULT_SCORING.authorSolveBase);
     expect(room.phase).toBe('CLUE_SCORING'); // all eligible solved -> ends early
 
     // answer is revealed to everyone during scoring, with the reveal payload
     const reveal = serializeRoomFor(room.getSnapshot(), b.id).activeClue!;
     expect(reveal.answer).toBe('Titanic');
-    expect(reveal.authorPoints).toBe(130);
+    expect(reveal.authorPoints).toBe(DEFAULT_SCORING.authorSolveBase);
     expect(reveal.solves).toHaveLength(1);
     expect(reveal.yourSolve).toMatchObject({ rank: 1, points: 1000 });
 
@@ -139,8 +141,8 @@ describe('Room state machine', () => {
     expect(room.phase).toBe('GUESSING');
 
     room.submitGuess(a.id, 'pizza');
-    // Alice: 1000 (solving Bob) + 130 (author of her own solved clue) = 1130
-    expect(scoreOf(room, a.id)).toBe(1130);
+    // Alice: 1000 (solving Bob) + 100 (author of her own instantly-solved clue)
+    expect(scoreOf(room, a.id)).toBe(1100);
     expect(room.phase).toBe('CLUE_SCORING');
 
     vi.advanceTimersByTime(4000);
@@ -151,8 +153,8 @@ describe('Room state machine', () => {
     expect(room.phase).toBe('GAME_RESULTS');
     const results = room.getSnapshot().gameResults!;
     expect(results).toHaveLength(2);
-    // Both: 1000 (guesser) + 130 (author) = 1130
-    expect(results.every((r) => r.totalScore === 1130)).toBe(true);
+    // Both: 1000 (guesser) + 100 (author) = 1100
+    expect(results.every((r) => r.totalScore === 1100)).toBe(true);
   });
 
   it('rejects invalid clue submissions', () => {
@@ -165,7 +167,9 @@ describe('Room state machine', () => {
 });
 
 /** Content with an endless supply of alternates, so the *limit* is what bites. */
-function deepRoom(config: { reshuffles?: number } = {}): { room: Room; a: Player; b: Player } {
+function deepRoom(
+  config: { reshuffles?: number; reshuffleCost?: number } = {},
+): { room: Room; a: Player; b: Player } {
   let n = 0;
   const content = {
     dealRound: () => ({ category: { slug: 'movies', name: 'Movies' }, assignments: PROMPTS }),
@@ -361,7 +365,7 @@ describe('Room guess broadcast (live feed payload)', () => {
       content: fakeContent,
       scoring: DEFAULT_SCORING,
       rng: () => 0.5,
-      hooks: { onStateChange() {}, onGuess: (_r, g) => guesses.push(g), onClosed() {} },
+      hooks: { ...noopHooks, onGuess: (_r, g) => guesses.push(g) },
     });
     const a = room.addPlayer('Alice', 'player');
     const b = room.addPlayer('Bob', 'player');
@@ -440,26 +444,27 @@ describe('Room letter hints', () => {
     expect(serializeRoomFor(room.getSnapshot(), b.id).activeClue?.hint).toBe('_______');
   });
 
-  it('pushes each letter as it lands, and stops at 75%', () => {
+  it('pushes each letter as it lands, and stops short of the answer', () => {
     const hints: string[] = [];
     const { room, b } = roomAtGuessing({
       onStateChange: () => {},
       onGuess: () => {},
       onHint: (_r, hint) => hints.push(hint),
+      onChat: () => {},
       onClosed: () => {},
     });
 
     vi.advanceTimersByTime(30_000); // the whole guess window
 
-    // 7 letters -> floor(7 * 0.75) = 5 reveals, one event each
-    expect(hints).toHaveLength(5);
+    // 7 letters -> floor(7 * 0.4) = 2 reveals, one event each
+    expect(hints).toHaveLength(2);
     expect(hints[0]!.replace(/[^_]/g, '')).toHaveLength(6); // one letter shown
     const last = hints[hints.length - 1]!;
-    expect(last.replace(/[^_]/g, '')).toHaveLength(2); // two still hidden
+    expect(last.replace(/[^_]/g, '')).toHaveLength(5); // five still hidden
     expect(last).not.toBe('Titanic');
     // every step reveals exactly one more letter than the one before it
     const shown = hints.map((h) => 7 - h.replace(/[^_]/g, '').length);
-    expect(shown).toEqual([1, 2, 3, 4, 5]);
+    expect(shown).toEqual([1, 2]);
   });
 
   it('never leaks the answer to a non-author, hint or not', () => {
@@ -486,6 +491,7 @@ describe('Room letter hints', () => {
       onStateChange: () => {},
       onGuess: () => {},
       onHint: (_r, hint) => hints.push(hint),
+      onChat: () => {},
       onClosed: () => {},
     });
     vi.advanceTimersByTime(6_000); // one letter has dropped
@@ -493,9 +499,272 @@ describe('Room letter hints', () => {
     room.submitGuess(b.id, 'Titanic'); // everyone solved -> CLUE_SCORING
     vi.advanceTimersByTime(30_000);
 
-    // Titanic had four ticks still pending; none of them fire. The only later
-    // hints belong to the next clue ("Pizza" -> 5 letters -> 3 reveals).
+    // Titanic had a tick still pending; it does not fire. The only later hints
+    // belong to the next clue ("Pizza" -> 5 letters -> 2 reveals).
     expect(hints.filter((h) => h.length === 'Titanic'.length)).toHaveLength(1);
-    expect(hints.filter((h) => h.length === 'Pizza'.length)).toHaveLength(3);
+    expect(hints.filter((h) => h.length === 'Pizza'.length)).toHaveLength(2);
+  });
+});
+
+/** Three-way content, so a room can have an author plus two separate guessers. */
+const TRIO_PROMPTS: PromptForPlay[] = [
+  { id: 't1', answer: 'Titanic', accepted: ['Titanic'], blocklist: [], difficulty: 1 },
+  { id: 't2', answer: 'Pizza', accepted: ['Pizza'], blocklist: [], difficulty: 1 },
+  { id: 't3', answer: 'Jaws', accepted: ['Jaws'], blocklist: [], difficulty: 1 },
+];
+
+const trioContent = {
+  dealRound: () => ({ category: { slug: 'movies', name: 'Movies' }, assignments: TRIO_PROMPTS }),
+  packs: () => [{ slug: 'movies', name: 'Movies', emoji: '🎬' }],
+  categorySlugsForPack: () => [],
+  drawOne: () => null,
+} as unknown as ContentProvider;
+
+/**
+ * A three-player room parked on Alice's clue, mid-guess: Bob and Cara are both
+ * eligible, so one can solve while the other is still working.
+ */
+function trioAtGuessing(hooks: RoomHooks = noopHooks): {
+  room: Room;
+  a: Player;
+  b: Player;
+  c: Player;
+} {
+  const room = new Room('TRIO', {
+    content: trioContent,
+    scoring: DEFAULT_SCORING,
+    rng: () => 0.5,
+    hooks,
+  });
+  const a = room.addPlayer('Alice', 'player');
+  const b = room.addPlayer('Bob', 'player');
+  const c = room.addPlayer('Cara', 'player');
+  room.configure(a.id, { rounds: 1 });
+  room.start(a.id);
+  vi.advanceTimersByTime(2000 + 3100);
+  room.submitClue(a.id, ['🚢', '🧊']);
+  room.submitClue(b.id, ['🍕']);
+  room.submitClue(c.id, ['🦈']);
+  vi.advanceTimersByTime(1500);
+  return { room, a, b, c };
+}
+
+describe('Room author points (time-weighted)', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('pays the author more for a solve that took work than an instant one', () => {
+    const instant = roomAtGuessing();
+    instant.room.submitGuess(instant.b.id, 'Titanic');
+    const fast = scoreOf(instant.room, instant.a.id);
+
+    const slow = roomAtGuessing();
+    vi.advanceTimersByTime(21_000); // 70% of the 30s window
+    slow.room.submitGuess(slow.b.id, 'Titanic');
+    const worked = scoreOf(slow.room, slow.a.id);
+
+    expect(fast).toBe(100); // base only — the clue everyone read off at a glance
+    expect(worked).toBe(205); // 100 + 150 × 0.7
+    expect(worked).toBeGreaterThan(fast);
+  });
+
+  it('still pays nothing when nobody solves', () => {
+    const { room, a } = roomAtGuessing();
+    vi.advanceTimersByTime(30_000); // window expires with no correct guess
+    expect(room.phase).toBe('CLUE_SCORING');
+    expect(scoreOf(room, a.id)).toBe(0);
+  });
+
+  it('adds up across solvers, so more solvers is still better', () => {
+    const { room, a, b, c } = trioAtGuessing();
+    vi.advanceTimersByTime(15_000);
+    room.submitGuess(b.id, 'Titanic');
+    const oneSolver = scoreOf(room, a.id);
+    room.submitGuess(c.id, 'Titanic');
+    expect(scoreOf(room, a.id)).toBeGreaterThan(oneSolver);
+  });
+});
+
+describe('Room prompt swap cost', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('charges the configured cost for each swap', () => {
+    const { room, a } = deepRoom({ reshuffles: 3 });
+    room.reshufflePrompt(a.id);
+    expect(scoreOf(room, a.id)).toBe(-150);
+    room.reshufflePrompt(a.id);
+    expect(scoreOf(room, a.id)).toBe(-300);
+  });
+
+  it('goes negative rather than clamping, so the first swap is never free', () => {
+    const { room, a } = deepRoom();
+    expect(scoreOf(room, a.id)).toBe(0);
+    room.reshufflePrompt(a.id);
+    expect(scoreOf(room, a.id)).toBeLessThan(0);
+  });
+
+  it('can be set to zero for a free-swap game', () => {
+    const { room, a } = deepRoom({ reshuffles: 3, reshuffleCost: 0 });
+    room.reshufflePrompt(a.id);
+    expect(scoreOf(room, a.id)).toBe(0);
+  });
+
+  it('clamps a hostile cost rather than trusting the host', () => {
+    const lobby = newRoom();
+    const host = lobby.addPlayer('Alice', 'player');
+    lobby.configure(host.id, { reshuffleCost: 99_999 });
+    expect(lobby.getSnapshot().config.reshuffleCost).toBe(500);
+    lobby.configure(host.id, { reshuffleCost: -50 });
+    expect(lobby.getSnapshot().config.reshuffleCost).toBe(0);
+  });
+
+  it('reports the charge on the round scoreboard, and the breakdown reconciles', () => {
+    const { room, a, b } = deepRoom({ reshuffles: 1 });
+    room.reshufflePrompt(a.id);
+    room.submitClue(a.id, ['🚢']);
+    room.submitClue(b.id, ['🍕']);
+    vi.advanceTimersByTime(1500 + 30_000 + 4000 + 1500 + 30_000 + 4000);
+    const rows = room.getSnapshot().roundResults!;
+    const alice = rows.find((r) => r.playerId === a.id)!;
+    expect(alice.penaltyPoints).toBe(150);
+    expect(alice.totalScore).toBe(alice.guesserPoints + alice.authorPoints - alice.penaltyPoints);
+  });
+
+  it('does not charge for a swap that was rejected', () => {
+    const { room, a } = deepRoom({ reshuffles: 0 });
+    expect(() => room.reshufflePrompt(a.id)).toThrow(/turned off/i);
+    expect(scoreOf(room, a.id)).toBe(0);
+  });
+});
+
+describe('Room clue bumps', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('lets a solver bump mid-window and pays the author', () => {
+    const { room, a, b } = trioAtGuessing();
+    room.submitGuess(b.id, 'Titanic');
+    const before = scoreOf(room, a.id);
+    room.bumpClue(b.id);
+    expect(scoreOf(room, a.id)).toBe(before + DEFAULT_SCORING.bumpPoints);
+  });
+
+  it('refuses a player who has not solved it yet', () => {
+    const { room, c } = trioAtGuessing();
+    expect(() => room.bumpClue(c.id)).toThrow(/solve it first/i);
+  });
+
+  it('refuses the author their own clue', () => {
+    const { room, a, b } = trioAtGuessing();
+    room.submitGuess(b.id, 'Titanic');
+    expect(() => room.bumpClue(a.id)).toThrow(/your own clue/i);
+  });
+
+  it('counts one bump per player', () => {
+    const { room, b } = trioAtGuessing();
+    room.submitGuess(b.id, 'Titanic');
+    room.bumpClue(b.id);
+    expect(() => room.bumpClue(b.id)).toThrow(/already bumped/i);
+  });
+
+  it('opens to the whole room once the clue resolves', () => {
+    const { room, a, b, c } = trioAtGuessing();
+    room.submitGuess(b.id, 'Titanic');
+    room.submitGuess(c.id, 'Titanic'); // everyone solved -> CLUE_SCORING
+    expect(room.phase).toBe('CLUE_SCORING');
+    const before = scoreOf(room, a.id);
+    room.bumpClue(c.id);
+    expect(scoreOf(room, a.id)).toBe(before + DEFAULT_SCORING.bumpPoints);
+  });
+
+  it('surfaces the tally through the serializer', () => {
+    const { room, b, c } = trioAtGuessing();
+    room.submitGuess(b.id, 'Titanic');
+    room.bumpClue(b.id);
+    const bView = serializeRoomFor(room.getSnapshot(), b.id).activeClue!;
+    expect(bView.bumps).toBe(1);
+    expect(bView.bumpPoints).toBe(DEFAULT_SCORING.bumpPoints);
+    expect(bView.youBumped).toBe(true);
+    expect(bView.youCanBump).toBe(false);
+    expect(serializeRoomFor(room.getSnapshot(), c.id).activeClue?.youCanBump).toBe(false);
+  });
+});
+
+describe('Room solvers chat', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  /** Captures every chat message alongside the audience the Room chose for it. */
+  function chatSpy(): { hooks: RoomHooks; sent: { text: string; to: string[] }[] } {
+    const sent: { text: string; to: string[] }[] = [];
+    return {
+      sent,
+      hooks: {
+        ...noopHooks,
+        onChat: (_r, message, recipientIds) => sent.push({ text: message.text, to: recipientIds }),
+      },
+    };
+  }
+
+  it('delivers only to the author and the players who have solved', () => {
+    const spy = chatSpy();
+    const { room, a, b, c } = trioAtGuessing(spy.hooks);
+    room.submitGuess(b.id, 'Titanic');
+    room.sendClueChat(b.id, 'called it off the boat');
+
+    expect(spy.sent).toHaveLength(1);
+    expect(spy.sent[0]!.to.sort()).toEqual([a.id, b.id].sort());
+    expect(spy.sent[0]!.to).not.toContain(c.id); // Cara is still guessing
+  });
+
+  it('refuses a player who is still guessing', () => {
+    const { room, c } = trioAtGuessing();
+    expect(() => room.sendClueChat(c.id, 'is it a boat?')).toThrow(/solve it first/i);
+  });
+
+  it('opens to the whole room once the clue resolves', () => {
+    const spy = chatSpy();
+    const { room, a, b, c } = trioAtGuessing(spy.hooks);
+    room.submitGuess(b.id, 'Titanic');
+    room.submitGuess(c.id, 'Titanic'); // -> CLUE_SCORING
+    room.sendClueChat(c.id, 'brutal clue');
+    expect(spy.sent[spy.sent.length - 1]!.to.sort()).toEqual([a.id, b.id, c.id].sort());
+  });
+
+  it('is closed outside a live clue', () => {
+    const room = newRoom();
+    const a = room.addPlayer('Alice', 'player');
+    room.addPlayer('Bob', 'player');
+    expect(() => room.sendClueChat(a.id, 'hello?')).toThrow(/no clue/i);
+  });
+
+  it('rejects empty messages and rate-limits a flood', () => {
+    const { room, b } = trioAtGuessing();
+    room.submitGuess(b.id, 'Titanic');
+    expect(() => room.sendClueChat(b.id, '   ')).toThrow(/empty/i);
+    room.sendClueChat(b.id, 'first');
+    expect(() => room.sendClueChat(b.id, 'second')).toThrow(/slow down/i);
+  });
+
+  it('keeps the log out of a still-guessing payload but hands it to solvers', () => {
+    const { room, a, b, c } = trioAtGuessing();
+    room.submitGuess(b.id, 'Titanic');
+    room.sendClueChat(b.id, 'it was the iceberg');
+
+    expect(serializeRoomFor(room.getSnapshot(), b.id).clueChat).toHaveLength(1);
+    expect(serializeRoomFor(room.getSnapshot(), a.id).clueChat).toHaveLength(1);
+    const caraView = JSON.stringify(serializeRoomFor(room.getSnapshot(), c.id));
+    expect(caraView).not.toContain('iceberg');
+    expect(caraView).not.toContain('Titanic');
+  });
+
+  it('starts each clue with a clean log', () => {
+    const { room, b, c } = trioAtGuessing();
+    room.submitGuess(b.id, 'Titanic');
+    room.sendClueChat(b.id, 'it was the iceberg');
+    room.submitGuess(c.id, 'Titanic'); // -> CLUE_SCORING
+    vi.advanceTimersByTime(4000 + 1500); // -> next clue, GUESSING
+    expect(room.getSnapshot().active?.chat).toEqual([]);
   });
 });

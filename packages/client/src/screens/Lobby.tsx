@@ -6,6 +6,7 @@ import { Avatar, Eyebrow, Panel, Segmented, StickerButton, cn } from '../ui.js';
 const ROUND_OPTS = [3, 5, 8];
 const TIMER_OPTS = [20, 30, 45];
 const RESHUFFLE_OPTS = [0, 1, 3, 5];
+const SWAP_COST_OPTS = [0, 100, 150, 250];
 
 export function LobbyScreen({ game, view }: { game: GameClient; view: RoomView }) {
   const me = view.players.find((p) => p.id === game.myId);
@@ -67,6 +68,19 @@ export function LobbyScreen({ game, view }: { game: GameClient; view: RoomView }
                   onChange={(reshuffles) => game.configure({ reshuffles })}
                 />
               </Setting>
+              {view.config.reshuffles > 0 && (
+                <Setting label="Swap cost">
+                  <Segmented
+                    options={SWAP_COST_OPTS.map((v) => ({
+                      label: v ? String(v) : 'free',
+                      value: v,
+                    }))}
+                    value={view.config.reshuffleCost}
+                    disabled={!isHost}
+                    onChange={(reshuffleCost) => game.configure({ reshuffleCost })}
+                  />
+                </Setting>
+              )}
               <Setting label="Pack">
                 <div className="flex flex-wrap gap-2">
                   {packOptions.map((pack) => (

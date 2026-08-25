@@ -13,11 +13,13 @@ import { nanoid } from 'nanoid';
 import {
   DEFAULT_ROOM_CONFIG,
   authorPoints,
+  bumpAward,
   guesserPoints,
   planHintReveal,
   renderHint,
   promptHasNumber,
   validateClue,
+  type ChatMessage,
   type ClueSolve,
   type ConfigureRoomPayload,
   type GamePhase,
@@ -43,12 +45,20 @@ const CLUE_REVEAL_MS = 1500; // brief "get ready" beat before guessing opens
 const CLUE_SCORING_MS = 4000; // per-clue reveal/payoff
 const ROUND_RESULTS_MS = 10000; // leaderboard auto-advance (design)
 const GUESS_MIN_INTERVAL_MS = 500;
+const CHAT_MIN_INTERVAL_MS = 400;
+const CHAT_MAX_LENGTH = 200;
+const CHAT_HISTORY_LIMIT = 100;
 
 export interface RoomHooks {
   onStateChange(room: Room): void;
   onGuess(room: Room, guess: PublicGuess): void;
   /** One more letter of the active clue's answer became visible. */
   onHint(room: Room, hint: string): void;
+  /**
+   * A solvers'-channel message. `recipientIds` is the audience the Room has
+   * already vetted — deliver to exactly those players and no one else.
+   */
+  onChat(room: Room, message: ChatMessage, recipientIds: string[]): void;
   onClosed(room: Room): void;
 }
 
@@ -62,7 +72,10 @@ export interface RoomDeps {
 interface PlayerState extends Player {
   guesserPointsRound: number;
   authorPointsRound: number;
+  /** points charged this round for prompt swaps, as a positive number */
+  penaltyPointsRound: number;
   lastGuessAt: number;
+  lastChatAt: number;
   guessedThisClue: Set<string>; // normalized guesses, reset per clue
 }
 
@@ -78,6 +91,12 @@ interface ActiveClue {
   solveCounter: number;
   solvers: Map<string, SolveRecord>; // guesserId -> solve record
   authorPoints: number | null; // set at CLUE_SCORING
+  /** Players who applauded this clue (one bump each). */
+  bumps: Set<string>;
+  /** Points those bumps have paid the author so far. */
+  bumpPoints: number;
+  /** The solvers' side channel for this clue, oldest first. */
+  chat: ChatMessage[];
   /** Which letters drop when, planned once at the top of the guess window. */
   hint: HintPlan | null;
   /** How many of `hint.order` have been revealed so far. */
@@ -111,6 +130,10 @@ export interface RoomSnapshot {
     eligibleCount: number;
     solves: ClueSolve[];
     authorPoints: number | null;
+    bumps: Set<string>;
+    bumpPoints: number;
+    /** Full chat log; the serializer decides who is allowed to see it. */
+    chat: ChatMessage[];
     /** Letter blanks as they stand right now; null outside GUESSING. */
     hint: string | null;
   } | null;
@@ -166,7 +189,9 @@ export class Room {
       joinedAt: Date.now(),
       guesserPointsRound: 0,
       authorPointsRound: 0,
+      penaltyPointsRound: 0,
       lastGuessAt: 0,
+      lastChatAt: 0,
       guessedThisClue: new Set(),
     };
     this.players.set(id, player);
@@ -224,6 +249,8 @@ export class Room {
       this.config.guessingSeconds = clamp(payload.guessingSeconds, 15, 120);
     if (payload.packSlug !== undefined) this.config.packSlug = payload.packSlug;
     if (payload.reshuffles !== undefined) this.config.reshuffles = clamp(payload.reshuffles, 0, 5);
+    if (payload.reshuffleCost !== undefined)
+      this.config.reshuffleCost = clamp(payload.reshuffleCost, 0, 500);
     this.changed();
   }
 
@@ -248,6 +275,7 @@ export class Room {
       p.score = 0;
       p.guesserPointsRound = 0;
       p.authorPointsRound = 0;
+      p.penaltyPointsRound = 0;
       p.ready = false;
     }
     this.usedPromptKeys.clear();
@@ -256,9 +284,17 @@ export class Room {
     this.beginRound();
   }
 
-  /** Swap a player's prompt for a different one in the same category. */
+  /**
+   * Swap a player's prompt for a different one in the same category.
+   *
+   * Swaps cost score (`config.reshuffleCost`). Free swaps let a player fish for
+   * whichever prompt is easiest to clue literally, which is the same incentive
+   * the author-points curve exists to remove — so the two need to agree.
+   */
   reshufflePrompt(playerId: string): void {
     if (this.phase !== 'CLUE_CREATION') throw new Error('Not the clue-building phase.');
+    const player = this.players.get(playerId);
+    if (!player) throw new Error('Unknown player.');
     if (!this.assignments.has(playerId)) throw new Error('You have no prompt this round.');
     if (this.clues.has(playerId)) throw new Error('You already submitted your clue.');
     const used = this.reshufflesUsed.get(playerId) ?? 0;
@@ -281,6 +317,11 @@ export class Room {
     this.assignments.set(playerId, replacement);
     this.usedPromptKeys.add(promptKey(replacement));
     this.reshufflesUsed.set(playerId, used + 1);
+    // Charged even if it takes the player negative: a floor would make the
+    // first swap of a game free, which is exactly the swap worth taxing.
+    const cost = this.config.reshuffleCost;
+    player.score -= cost;
+    player.penaltyPointsRound += cost;
     this.touch();
     this.changed();
   }
@@ -381,6 +422,71 @@ export class Room {
     };
   }
 
+  /**
+   * Applaud the active clue. Pays its author, once per player per clue.
+   *
+   * Gated on being entitled to the answer, which is the same predicate the
+   * serializer uses: while the clock runs only solvers can bump (they have
+   * seen what the clue was worth), and once it resolves the whole room can.
+   */
+  bumpClue(playerId: string): void {
+    const clue = this.active;
+    if (!clue) throw new Error('No clue to bump.');
+    const player = this.players.get(playerId);
+    if (!player) throw new Error('Unknown player.');
+    if (player.role === 'spectator') throw new Error('Spectators cannot bump.');
+    if (playerId === clue.authorId) throw new Error('You cannot bump your own clue.');
+    if (clue.bumps.has(playerId)) throw new Error('You already bumped this clue.');
+    if (!this.canSeeAnswer(playerId)) throw new Error('Solve it first.');
+
+    clue.bumps.add(playerId);
+    const award = bumpAward(1, this.deps.scoring);
+    clue.bumpPoints += award;
+    const author = this.players.get(clue.authorId);
+    if (author) {
+      author.authorPointsRound += award;
+      author.score += award;
+    }
+    this.touch();
+    this.changed();
+  }
+
+  /**
+   * Post to the solvers' side channel for the active clue.
+   *
+   * The audience is computed here rather than at the transport, so the rule
+   * that this text never reaches a player who is still guessing lives next to
+   * the state it depends on. See `canSeeAnswer`.
+   */
+  sendClueChat(playerId: string, text: string): void {
+    const clue = this.active;
+    if (!clue) throw new Error('No clue to talk about.');
+    if (this.phase !== 'GUESSING' && this.phase !== 'CLUE_SCORING')
+      throw new Error('Chat is closed right now.');
+    const player = this.players.get(playerId);
+    if (!player) throw new Error('Unknown player.');
+    if (!this.canSeeAnswer(playerId)) throw new Error('Solve it first.');
+
+    const body = text.trim().slice(0, CHAT_MAX_LENGTH);
+    if (!body) throw new Error('Empty message.');
+    const now = Date.now();
+    if (now - player.lastChatAt < CHAT_MIN_INTERVAL_MS) throw new Error('Slow down a little.');
+    player.lastChatAt = now;
+
+    const message: ChatMessage = {
+      id: nanoid(),
+      playerId,
+      playerName: player.displayName,
+      avatar: player.avatar,
+      text: body,
+      at: now,
+    };
+    clue.chat.push(message);
+    if (clue.chat.length > CHAT_HISTORY_LIMIT) clue.chat.shift();
+    this.touch();
+    this.deps.hooks.onChat(this, message, this.answerAudience());
+  }
+
   hostSkip(byPlayerId: string): void {
     this.assertHost(byPlayerId);
     if (this.phase === 'GUESSING') this.endGuessing();
@@ -454,6 +560,9 @@ export class Room {
       solveCounter: 0,
       solvers: new Map(),
       authorPoints: null,
+      bumps: new Set(),
+      bumpPoints: 0,
+      chat: [],
       hint: null,
       hintShown: 0,
     };
@@ -522,7 +631,14 @@ export class Room {
   private endGuessing(): void {
     if (!this.active) return;
     const author = this.players.get(this.active.authorId);
-    const pts = authorPoints(this.active.solvers.size, this.deps.scoring);
+    // Each solve is worth more the longer it took, so a clue that made the room
+    // work outscores one everybody read off at a glance. Bumps are paid as they
+    // arrive and are tracked separately (`bumpPoints`).
+    const pts = authorPoints(
+      this.active.solvers.values(),
+      this.config.guessingSeconds * 1000,
+      this.deps.scoring,
+    );
     this.active.authorPoints = pts; // record on the clue for the Reveal screen
     if (author) {
       author.authorPointsRound += pts;
@@ -545,6 +661,7 @@ export class Room {
     for (const p of this.players.values()) {
       p.guesserPointsRound = 0;
       p.authorPointsRound = 0;
+      p.penaltyPointsRound = 0;
     }
     if (this.roundNumber >= this.config.rounds) this.endGame();
     else this.beginRound();
@@ -601,6 +718,23 @@ export class Room {
     }
   }
 
+  /**
+   * Is this player entitled to the active clue's answer right now? Authors
+   * always are, solvers are from the moment they solve, and everyone is once
+   * the clue resolves. The serializer applies the same rule to `answer` and
+   * `clueChat`, so the two can never disagree.
+   */
+  private canSeeAnswer(playerId: string): boolean {
+    if (!this.active) return false;
+    if (this.phase === 'CLUE_SCORING') return true;
+    return playerId === this.active.authorId || this.active.solvers.has(playerId);
+  }
+
+  /** Every player currently entitled to the answer — the chat's audience. */
+  private answerAudience(): string[] {
+    return [...this.players.values()].filter((p) => this.canSeeAnswer(p.id)).map((p) => p.id);
+  }
+
   private eligibleGuessers(): number {
     let n = 0;
     for (const p of this.players.values()) {
@@ -619,6 +753,7 @@ export class Room {
         totalScore: p.score,
         guesserPoints: p.guesserPointsRound,
         authorPoints: p.authorPointsRound,
+        penaltyPoints: p.penaltyPointsRound,
         rank: 0,
       }))
       .sort((a, b) => b.totalScore - a.totalScore);
@@ -669,6 +804,9 @@ export class Room {
         eligibleCount: this.eligibleGuessers(),
         solves: this.buildSolves(this.active),
         authorPoints: this.active.authorPoints,
+        bumps: new Set(this.active.bumps),
+        bumpPoints: this.active.bumpPoints,
+        chat: this.active.chat,
         hint: this.currentHint(),
       };
     }

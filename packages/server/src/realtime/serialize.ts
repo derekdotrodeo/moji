@@ -18,6 +18,17 @@ export function serializeRoomFor(snap: RoomSnapshot, recipientId: string): RoomV
     if (snap.phase === 'CLUE_SCORING' || youAreAuthor) activeAnswer = snap.active.answer;
   }
 
+  // Solvers get the answer too, and with it the solvers' side channel. Deriving
+  // both from one flag is the point: chat is written by people who know the
+  // answer and routinely contains it, so it can never be visible to anyone the
+  // answer isn't. Adding a way to see chat means adding a way to see `answer`.
+  const youSolved = !!snap.active?.solves.some((s) => s.playerId === recipientId);
+  if (snap.active && youSolved) activeAnswer = snap.active.answer;
+  const youKnowAnswer = activeAnswer !== null;
+  // Mirrors Room.bumpClue's guards exactly, so the button is never offered to
+  // someone the server would turn away.
+  const youArePlayer = snap.players.find((p) => p.id === recipientId)?.role === 'player';
+
   const reshufflesLeft = Math.max(
     0,
     snap.config.reshuffles - (snap.reshufflesUsed.get(recipientId) ?? 0),
@@ -59,10 +70,19 @@ export function serializeRoomFor(snap: RoomSnapshot, recipientId: string): RoomV
           solves: snap.active.solves,
           // Author earnings shown once the clue resolves.
           authorPoints: snap.phase === 'CLUE_SCORING' ? snap.active.authorPoints : null,
+          bumps: snap.active.bumps.size,
+          bumpPoints: snap.active.bumpPoints,
+          youBumped: snap.active.bumps.has(recipientId),
+          youCanBump:
+            youKnowAnswer &&
+            youArePlayer &&
+            !youAreAuthor &&
+            !snap.active.bumps.has(recipientId),
           yourSolve: snap.active.solves.find((s) => s.playerId === recipientId) ?? null,
         }
       : null,
     guessFeed: snap.guessFeed,
+    clueChat: youKnowAnswer && snap.active ? snap.active.chat : [],
     roundResults: snap.roundResults,
     gameResults: snap.gameResults,
   };

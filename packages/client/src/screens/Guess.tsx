@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type UIEvent } from 'react';
-import type { PublicGuess, RoomView } from '@moji/shared';
+import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from 'react';
+import type { ActiveClueView, ChatMessage, PublicGuess, RoomView } from '@moji/shared';
 import type { GameClient } from '../useGame.js';
 import { TimerRing } from '../components/TimerRing.js';
 import { Avatar, Eyebrow, StickerButton, cn } from '../ui.js';
@@ -14,6 +14,9 @@ export function GuessScreen({ game, view }: { game: GameClient; view: RoomView }
   // deadline is the (short) reveal timer, which would flash a stale countdown.
   const ringDeadline = guessing ? view.deadlineTs : null;
   const avatarOf = (id: string) => view.players.find((p) => p.id === id)?.avatar ?? '❓';
+  // Solving ends your round on this clue: the blanks stop being a puzzle and
+  // the guess box stops being usable, so both give way to the payoff.
+  const solved = !!clue.yourSolve;
 
   return (
     <div className="mx-auto flex h-[100dvh] max-w-7xl flex-col gap-4 px-4 py-4 lg:grid lg:grid-cols-[236px_1fr_372px]">
@@ -53,7 +56,7 @@ export function GuessScreen({ game, view }: { game: GameClient; view: RoomView }
           ))}
         </div>
 
-        {!clue.youAreAuthor && guessing && game.hint && <HintBlanks hint={game.hint} />}
+        {!clue.youAreAuthor && !solved && guessing && game.hint && <HintBlanks hint={game.hint} />}
 
         {clue.youAreAuthor ? (
           <p className="mt-8 text-muted">
@@ -61,6 +64,8 @@ export function GuessScreen({ game, view }: { game: GameClient; view: RoomView }
             <br />
             <span className="text-muted-3">(answer: {clue.answer})</span>
           </p>
+        ) : solved ? (
+          <SolvedBanner clue={clue} onBump={() => void game.bump()} />
         ) : !guessing ? (
           <p className="mt-8 animate-moji-pulse font-display text-xl font-extrabold text-cyan">
             get ready…
@@ -81,12 +86,65 @@ export function GuessScreen({ game, view }: { game: GameClient; view: RoomView }
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col rounded-card border border-hairline2 bg-panel">
-          <GuessFeed feed={game.feed} myId={game.myId} avatarOf={avatarOf} />
-          {!clue.youAreAuthor && (
+          <GuessFeed feed={game.feed} chat={game.chat} myId={game.myId} avatarOf={avatarOf} />
+          {solved || clue.youAreAuthor ? (
+            // You already know the answer, so the guess box would only reject
+            // you. Talk to the others who know instead.
+            <ChatInput disabled={!guessing} onSubmit={(t) => void game.sendChat(t)} />
+          ) : (
             <GuessInput disabled={!guessing} onSubmit={(t) => game.submitGuess(t)} />
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+/**
+ * What a solver sees for the rest of the window. Three jobs: confirm the solve
+ * and what it paid, show the answer they earned, and give them something to do
+ * with the clue — bumping pays its author and is the only way to say "that was
+ * a good one" without leaking it to the people still guessing.
+ */
+function SolvedBanner({ clue, onBump }: { clue: ActiveClueView; onBump: () => void }) {
+  const stillGuessing = Math.max(0, clue.eligibleCount - clue.solvedCount);
+  return (
+    <div className="mt-8 flex animate-moji-pop flex-col items-center gap-3">
+      <div className="flex items-center gap-3 rounded-sticker border-[2.5px] border-outline bg-mint px-4 py-2 text-outline shadow-sticker">
+        <span className="font-display text-lg font-extrabold">got it!</span>
+        <span className="rounded-pill bg-outline px-2.5 py-0.5 font-mono text-sm text-mint">
+          +{clue.yourSolve?.points ?? 0}
+        </span>
+      </div>
+
+      <p className="font-display text-2xl font-extrabold text-paper">{clue.answer}</p>
+
+      <p className="font-mono text-xs uppercase tracking-[1.5px] text-muted">
+        {stillGuessing > 0
+          ? `${stillGuessing} still guessing…`
+          : 'everybody got it — nice clue'}
+      </p>
+
+      <button
+        type="button"
+        onClick={onBump}
+        disabled={!clue.youCanBump}
+        className={cn(
+          'flex items-center gap-2 rounded-pill border-[2.5px] px-4 py-1.5 font-display text-sm font-extrabold transition-all',
+          'hover:-translate-y-0.5 disabled:pointer-events-none',
+          clue.youBumped
+            ? 'border-outline bg-gold text-outline shadow-sticker-sm'
+            : 'border-gold text-gold hover:bg-gold hover:text-outline',
+        )}
+      >
+        👏 {clue.youBumped ? 'bumped' : 'bump this clue'}
+        {clue.bumps > 0 && (
+          <span className="font-mono text-xs opacity-80">×{clue.bumps}</span>
+        )}
+      </button>
+      <p className="-mt-1 font-mono text-[10px] uppercase tracking-[1.5px] text-muted-3">
+        a bump pays {clue.authorName} +50
+      </p>
     </div>
   );
 }
@@ -164,17 +222,39 @@ function ScoresRail({ view, myId }: { view: RoomView; myId: string | null }) {
 /** How close to the bottom still counts as "following along". */
 const NEAR_BOTTOM_PX = 48;
 
+/**
+ * One row of the feed. Public guesses and solver chat share a scroll so the
+ * conversation reads in order, but they are visually separate: chat only ever
+ * reaches players who already know the answer, and it must never be mistaken
+ * for something everyone can see.
+ */
+type FeedRow =
+  | { kind: 'guess'; id: string; at: number; guess: PublicGuess }
+  | { kind: 'chat'; id: string; at: number; message: ChatMessage };
+
 function GuessFeed({
   feed,
+  chat,
   myId,
   avatarOf,
 }: {
   feed: PublicGuess[];
+  chat: ChatMessage[];
   myId: string | null;
   avatarOf: (id: string) => string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
+
+  const rows = useMemo<FeedRow[]>(() => {
+    const merged: FeedRow[] = [
+      ...feed.map((g): FeedRow => ({ kind: 'guess', id: g.id, at: g.at, guess: g })),
+      ...chat.map((m): FeedRow => ({ kind: 'chat', id: m.id, at: m.at, message: m })),
+    ];
+    // Tie-break on id so a guess and a chat stamped the same millisecond don't
+    // swap places between renders.
+    return merged.sort((x, y) => x.at - y.at || x.id.localeCompare(y.id));
+  }, [feed, chat]);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -186,12 +266,12 @@ function GuessFeed({
   // Follow the newest guess automatically, but don't yank a player who has
   // scrolled up to read — they get a "jump to newest" pill instead.
   useEffect(() => {
-    if (feed.length === 0) {
+    if (rows.length === 0) {
       setPinned(true); // new clue: the feed resets, so start following again
       return;
     }
     if (pinned) scrollToBottom();
-  }, [feed.length, pinned, scrollToBottom]);
+  }, [rows.length, pinned, scrollToBottom]);
 
   const onScroll = (e: UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
@@ -201,42 +281,27 @@ function GuessFeed({
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto p-3">
-        {feed.length === 0 ? (
+        {rows.length === 0 ? (
           <div className="py-8 text-center text-muted">be the first to guess… ⚡</div>
         ) : (
           <div className="space-y-1.5">
-            {feed.map((g) => {
-              const mine = g.guesserId === myId;
-              return (
-                <div
-                  key={g.id}
-                  className={cn(
-                    'flex items-center gap-2 rounded-tile px-3 py-1.5 text-sm',
-                    g.isCorrect ? 'bg-mint font-semibold text-outline' : 'bg-inset',
-                  )}
-                >
-                  <span className="text-lg">{avatarOf(g.guesserId)}</span>
-                  <span className={cn('font-semibold', mine && !g.isCorrect && 'text-gold')}>
-                    {g.guesserName}
-                  </span>
-                  {g.isCorrect ? (
-                    <>
-                      <span className="flex-1">guessed it!</span>
-                      <span className="rounded-pill bg-outline px-2 py-0.5 font-mono text-xs text-mint">
-                        +{g.points}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="flex-1 text-text-2">{g.text}</span>
-                  )}
-                </div>
-              );
-            })}
+            {rows.map((row) =>
+              row.kind === 'chat' ? (
+                <ChatRow key={row.id} message={row.message} mine={row.message.playerId === myId} />
+              ) : (
+                <GuessRow
+                  key={row.id}
+                  guess={row.guess}
+                  mine={row.guess.guesserId === myId}
+                  avatar={avatarOf(row.guess.guesserId)}
+                />
+              ),
+            )}
           </div>
         )}
       </div>
 
-      {!pinned && feed.length > 0 && (
+      {!pinned && rows.length > 0 && (
         <button
           type="button"
           onClick={scrollToBottom}
@@ -245,6 +310,99 @@ function GuessFeed({
           newest ↓
         </button>
       )}
+    </div>
+  );
+}
+
+function GuessRow({
+  guess,
+  mine,
+  avatar,
+}: {
+  guess: PublicGuess;
+  mine: boolean;
+  avatar: string;
+}) {
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-2 rounded-tile px-3 py-1.5 text-sm',
+        guess.isCorrect ? 'bg-mint font-semibold text-outline' : 'bg-inset',
+      )}
+    >
+      <span className="text-lg">{avatar}</span>
+      <span className={cn('font-semibold', mine && !guess.isCorrect && 'text-gold')}>
+        {guess.guesserName}
+      </span>
+      {guess.isCorrect ? (
+        <>
+          <span className="flex-1">guessed it!</span>
+          <span className="rounded-pill bg-outline px-2 py-0.5 font-mono text-xs text-mint">
+            +{guess.points}
+          </span>
+        </>
+      ) : (
+        <span className="flex-1 text-text-2">{guess.text}</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A solver-channel message. Cyan and rail-marked so it reads as a different
+ * room from the public guesses — you are looking at something the players still
+ * guessing cannot see, and that has to be obvious at a glance before anyone
+ * types the answer into it.
+ */
+function ChatRow({ message, mine }: { message: ChatMessage; mine: boolean }) {
+  return (
+    <div className="flex items-start gap-2 rounded-tile border-l-[3px] border-cyan bg-cyan/10 px-3 py-1.5 text-sm">
+      <span className="text-lg leading-tight">{message.avatar}</span>
+      <span className={cn('font-semibold', mine ? 'text-gold' : 'text-cyan')}>
+        {message.playerName}
+      </span>
+      <span className="flex-1 break-words text-text-2">{message.text}</span>
+    </div>
+  );
+}
+
+/** Chat for the players who already know the answer. */
+function ChatInput({
+  disabled,
+  onSubmit,
+}: {
+  disabled: boolean;
+  onSubmit: (text: string) => void;
+}) {
+  const [text, setText] = useState('');
+  const send = () => {
+    const t = text.trim();
+    if (!t) return;
+    setText('');
+    onSubmit(t);
+  };
+  return (
+    <div className="border-t border-hairline2 p-3">
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-cyan" />
+        <span className="font-mono text-[10px] uppercase tracking-[1.5px] text-cyan">
+          solvers only · hidden from the rest
+        </span>
+      </div>
+      <div className="flex gap-2">
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && send()}
+          disabled={disabled}
+          placeholder={disabled ? 'chat closes with the clue…' : 'say something…'}
+          maxLength={200}
+          className="w-full rounded-tile border-2 border-cyan/40 bg-inset px-4 py-2.5 outline-none focus:border-cyan disabled:opacity-50"
+        />
+        <StickerButton variant="cyan" onClick={send} disabled={disabled} aria-label="send message">
+          ↑
+        </StickerButton>
+      </div>
     </div>
   );
 }

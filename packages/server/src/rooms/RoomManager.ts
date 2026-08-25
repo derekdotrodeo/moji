@@ -6,7 +6,12 @@
  * Broadcaster (how messages ship), ContentProvider (prompt dealing). Swapping
  * any of them for a scaled-out implementation does not touch game logic.
  */
-import { DEFAULT_SCORING, type JoinRoomPayload, type PublicGuess } from '@moji/shared';
+import {
+  DEFAULT_SCORING,
+  type ChatMessage,
+  type JoinRoomPayload,
+  type PublicGuess,
+} from '@moji/shared';
 import type { Broadcaster } from '../realtime/Broadcaster.js';
 import { serializeRoomFor } from '../realtime/serialize.js';
 import { issueSessionToken, verifySessionToken } from '../auth/session.js';
@@ -146,6 +151,15 @@ export class RoomManager implements RoomHooks {
   onGuess(room: Room, guess: PublicGuess): void {
     // Already public-safe (correct guesses are blanked in Room.submitGuess).
     this.broadcaster.toRoom(room.code, 'guess:new', guess);
+  }
+
+  onChat(room: Room, message: ChatMessage, recipientIds: string[]): void {
+    // Per-socket, never toRoom(): the Room vetted this audience because the
+    // text is unfiltered player writing that usually names the answer.
+    for (const playerId of recipientIds) {
+      const socketId = this.playerToSocket.get(playerId);
+      if (socketId) this.broadcaster.toSocket(socketId, 'chat:new', message);
+    }
   }
 
   onHint(room: Room, hint: string): void {

@@ -7,7 +7,7 @@
  *   - server → client events are state pushes / notifications.
  */
 
-import type { GuessResult, PublicGuess, RoomView } from './types.js';
+import type { ChatMessage, GuessResult, PublicGuess, RoomView } from './types.js';
 
 /** Standard ack shape for commands. */
 export type Ack<T = void> = (res: AckResult<T>) => void;
@@ -39,6 +39,7 @@ export interface ConfigureRoomPayload {
   guessingSeconds?: number;
   packSlug?: string;
   reshuffles?: number;
+  reshuffleCost?: number;
 }
 
 export interface SubmitCluePayload {
@@ -49,6 +50,10 @@ export interface SubmitGuessPayload {
   text: string;
 }
 
+export interface ClueChatPayload {
+  text: string;
+}
+
 /** Events the client emits to the server. */
 export interface ClientToServerEvents {
   'room:join': (payload: JoinRoomPayload, ack: Ack<JoinRoomResult>) => void;
@@ -56,10 +61,14 @@ export interface ClientToServerEvents {
   'room:configure': (payload: ConfigureRoomPayload, ack: Ack) => void;
   'player:ready': (ready: boolean, ack: Ack) => void;
   'game:start': (ack: Ack) => void;
-  /** swap your prompt for a different one (once per round) */
+  /** swap your prompt for a different one (costs points; limited per round) */
   'clue:reshuffle': (ack: Ack) => void;
   'clue:submit': (payload: SubmitCluePayload, ack: Ack) => void;
   'guess:submit': (payload: SubmitGuessPayload, ack: Ack<GuessResult>) => void;
+  /** applaud the active clue — pays its author, once per player per clue */
+  'clue:bump': (ack: Ack) => void;
+  /** talk to the others who already know the answer */
+  'clue:chat': (payload: ClueChatPayload, ack: Ack) => void;
   'host:skip': (ack: Ack) => void;
   'host:next': (ack: Ack) => void;
 }
@@ -75,6 +84,12 @@ export interface ServerToClientEvents {
    * now stands, so a client that missed a tick still lands in the right place.
    */
   'clue:hint': (hint: string) => void;
+  /**
+   * A message in the solvers' side channel. Fanned out per-socket to only the
+   * players entitled to the answer — never broadcast to the room, because the
+   * text is unfiltered and usually contains it.
+   */
+  'chat:new': (message: ChatMessage) => void;
   /** Host changed (e.g. migration). */
   'host:changed': (hostId: string) => void;
   /** Recoverable/informational error not tied to a specific command ack. */

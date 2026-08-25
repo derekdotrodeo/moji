@@ -54,6 +54,8 @@ export interface RoomConfig {
   packSlug: string;
   /** prompt swaps each player gets per round; 0 turns the feature off */
   reshuffles: number;
+  /** score charged for each prompt swap; 0 makes swapping free */
+  reshuffleCost: number;
 }
 
 export const DEFAULT_ROOM_CONFIG: RoomConfig = {
@@ -62,6 +64,7 @@ export const DEFAULT_ROOM_CONFIG: RoomConfig = {
   guessingSeconds: 30, // design default (20 / [30] / 45)
   packSlug: '',
   reshuffles: 3,
+  reshuffleCost: 150, // a swap is a real choice, not a free reroll
 };
 
 /** A single emoji clue authored by a player for their secret prompt. */
@@ -98,6 +101,22 @@ export interface GuessResult {
 export interface CategorySummary {
   slug: string;
   name: string;
+}
+
+/**
+ * A message in the solvers' side channel for the active clue.
+ *
+ * ANTI-CHEAT: these are written by players who already know the answer and are
+ * very likely to contain it, so they ship under exactly the same rule as the
+ * answer itself — see `RoomView.clueChat`.
+ */
+export interface ChatMessage {
+  id: string;
+  playerId: string;
+  playerName: string;
+  avatar: string;
+  text: string;
+  at: number;
 }
 
 /** One player's solve of the active clue (revealed on the Reveal screen). */
@@ -143,6 +162,13 @@ export interface RoomView {
   activeClue: ActiveClueView | null;
   /** Live guess feed for the active clue (most recent last). */
   guessFeed: PublicGuess[];
+  /**
+   * The solvers' side channel for the active clue. Populated only when the
+   * recipient is entitled to the answer (they authored the clue, they solved
+   * it, or it has resolved) — empty for anyone still guessing, because these
+   * messages routinely name the answer. Same gate as `ActiveClueView.answer`.
+   */
+  clueChat: ChatMessage[];
 
   /** Populated during result phases. */
   roundResults: ScoreRow[] | null;
@@ -170,6 +196,14 @@ export interface ActiveClueView {
   solves: ClueSolve[];
   /** Points awarded to the author for this clue — set at CLUE_SCORING. */
   authorPoints: number | null;
+  /** How many players have bumped this clue. */
+  bumps: number;
+  /** Points the bumps have earned the author so far. */
+  bumpPoints: number;
+  /** Whether the recipient has already bumped this clue. */
+  youBumped: boolean;
+  /** Whether the recipient may bump right now (solved it, or it has resolved). */
+  youCanBump: boolean;
   /** The recipient's own solve of this clue, if any. */
   yourSolve: ClueSolve | null;
 }
@@ -181,5 +215,7 @@ export interface ScoreRow {
   totalScore: number;
   guesserPoints: number;
   authorPoints: number;
+  /** points charged this round for prompt swaps (a positive number) */
+  penaltyPoints: number;
   rank: number;
 }

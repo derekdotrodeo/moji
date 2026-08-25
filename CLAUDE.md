@@ -10,14 +10,25 @@ machine (or any session) starts with the same context.
 Break these only on purpose.
 
 - **The server is authoritative.** Everything sent to clients goes through the role-filtered
-  serializer in `packages/server/src/realtime/serialize.ts`, so a clue's prompt/answer is never
-  present in a non-author's payload. Any new field on a clue/room needs a decision in that file.
+  serializer in `packages/server/src/realtime/serialize.ts`, so a clue's answer is physically
+  absent from the payload of anyone not entitled to it — that is the author, anyone who has
+  already solved it, and everyone once the clue resolves. Any new field on a clue/room needs a
+  decision in that file.
 - **Live room state is in memory, behind a seam.** `packages/server/src/rooms/RoomStore.ts` exists
   so state can move to Redis later without touching the state machine. Keep room mutation behind it.
 - **Scoring is pure and config-driven.** `packages/shared/src/scoring.ts` — the state machine
-  hard-codes no constants. Guesser points decay linearly 1000 → 150 across the guess window;
-  author points are 130 per solver. That last one is deliberate: it replaced a "Goldilocks" curve
-  that zeroed out too-obvious clues, because rewarding clues that land plays better.
+  hard-codes no constants. Guesser points decay linearly 1000 → 150 across the guess window.
+  **Author points are time-weighted per solver:** each solve pays `100 + 150 × (howLongItTook /
+  window)`, summed. Both dials matter — the author wants everyone to get there, but not instantly.
+  This replaced a flat 130-per-solver rate, under which the most literal clue you could build
+  (🦁👑) was strictly optimal — the same "type the answer as a picture" failure that
+  `docs/content-guidelines.md` rejects whole categories for. It is deliberately monotonic in *both*
+  solvers and time, so a solve never costs you anything; that is what the older "Goldilocks" curve
+  got wrong when it zeroed out clues after players had done the work.
+- **Prompt swaps cost score** (`RoomConfig.reshuffleCost`, default 150, charged in
+  `Room.reshufflePrompt`). Free swaps let a player fish for the prompt that is easiest to clue
+  literally, which pulls against the author curve above. The charge is *not* floored at zero — a
+  floor would make the first swap of a game free, and that is exactly the swap worth taxing.
 - **Emoji validation runs on both sides.** `packages/shared/src/emoji-rules.ts` is enforced in the
   client for instant feedback *and* on the server as the authoritative backstop against pasted or
   tampered input. 1–10 emoji; no number emoji when the answer contains a digit; no spelling out
@@ -25,11 +36,20 @@ Break these only on purpose.
 - **Letter hints are computed server-side and pushed one step at a time.**
   `shared/hints.ts` plans which letters drop when; `Room` ticks the schedule and emits `clue:hint`
   with the mask as it currently stands. The plan and the answer never leave the server, and the
-  reveal fraction is floored so the mask can never become the answer.
+  reveal fraction is floored so the mask can never become the answer. The fraction is **0.4**: at
+  the original 0.75 a short answer was gutted (`Jaws` finished as `J_ws`) and the back half of
+  every clue turned into hangman. Raising it again means re-checking short answers, not long ones.
+- **The solvers' side channel ships under the answer's own rule.** Once you solve a clue you get
+  its answer, a chat with the other people who know it (`clue:chat` → `chat:new`), and a bump that
+  pays the author. `serialize.ts` derives `clueChat` visibility from the same flag as
+  `activeClue.answer`, so the two cannot drift: chat is unfiltered player writing that routinely
+  contains the answer, and it is fanned out **per-socket** from `RoomManager.onChat`, never
+  `toRoom`. If you add a way to see chat, you are adding a way to see the answer.
 - **Game phases:** LOBBY → ROUND_INTRO → PROMPT_ASSIGNMENT → CLUE_CREATION → CLUE_REVEAL →
   GUESSING → CLUE_SCORING → ROUND_RESULTS → GAME_RESULTS → ROOM_CLOSED (`packages/shared/src/types.ts`).
-- **Defaults:** 3 rounds, 60s clue creation, 30s guessing (`DEFAULT_ROOM_CONFIG`). Three rounds is a
-  playtest-tuned choice for snappier first games; the host can raise it.
+- **Defaults:** 3 rounds, 60s clue creation, 30s guessing, 3 prompt swaps at 150 points each
+  (`DEFAULT_ROOM_CONFIG`). Three rounds is a playtest-tuned choice for snappier first games; the
+  host can raise it.
 
 ## Content
 
@@ -41,6 +61,13 @@ prompt is the whole game, and it is not obvious from the data file.
 
 The first playtest went well (August 2026). Current work: fixing bugs surfaced in play, and
 adding content.
+
+A design review after that playtest drove the incentive pass above (time-weighted author points,
+paid prompt swaps, the 0.4 hint fraction, the solved state / chat / bump). Two of its larger ideas
+are **not** built and are still open: a **Blitz mode** that plays every clue in one shared window
+instead of serially, and a **same-prompt voting round** where the whole room clues one prompt and
+votes on the best clue. Both are pacing/format changes rather than tuning — the serial playback
+loop is ~35s per player per round, so an 8-player game runs about 18 minutes.
 
 ## Known gap
 

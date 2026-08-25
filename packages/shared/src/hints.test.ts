@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_HINT_CONFIG,
+  HINT_REVEAL_FRACTION,
   HINT_START_DELAY_MS,
   maskableIndices,
   planHintReveal,
@@ -32,9 +33,27 @@ describe('hint masking', () => {
 describe('hint schedule', () => {
   const WINDOW = 30_000;
 
-  it('reveals 75% of the letters', () => {
+  it('reveals the configured share of the letters', () => {
     const { order } = planHintReveal('Grand Theft Auto', WINDOW, fixedRng); // 14 letters
-    expect(order).toHaveLength(Math.floor(14 * 0.75)); // 10
+    expect(order).toHaveLength(Math.floor(14 * HINT_REVEAL_FRACTION)); // 5
+  });
+
+  it('leaves a short answer mostly hidden', () => {
+    // The regression this fraction exists for: at 0.75 "Jaws" ended as "J_ws".
+    const cases: [string, number][] = [
+      ['Jaws', 1],
+      ['Portal', 2],
+      ['Minecraft', 3],
+      ['The Lion King', 4], // 11 letters, the space is not a slot
+    ];
+    for (const [answer, expected] of cases) {
+      const { order } = planHintReveal(answer, WINDOW, fixedRng);
+      expect(order, answer).toHaveLength(expected);
+      // more of the answer stays blank than gets given away
+      const hint = renderHint(answer, order);
+      const blanks = [...hint].filter((c) => c === '_').length;
+      expect(blanks, answer).toBeGreaterThan(order.length);
+    }
   });
 
   it('always leaves at least one letter hidden', () => {
@@ -64,10 +83,14 @@ describe('hint schedule', () => {
   });
 
   it('scatters positions rather than running left to right', () => {
+    // The shape of the answer should arrive before its spelling, so the letters
+    // that drop must not simply be the first N of the title.
     let i = 0;
     const rng = () => [0.1, 0.9, 0.4, 0.7, 0.2, 0.55, 0.05, 0.8][i++ % 8]!;
     const { order } = planHintReveal('Minecraft', 30_000, rng);
-    expect(order).not.toEqual([...order].sort((a, b) => a - b));
+    expect(order.length).toBeGreaterThan(0);
+    const leftToRight = order.map((_, n) => n);
+    expect(order).not.toEqual(leftToRight);
   });
 
   it('honours a custom config', () => {

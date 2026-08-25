@@ -5,10 +5,8 @@
  * Reconciled with the "Retro Internet Party" design handoff:
  *   - Guesser points are TIME-WEIGHTED (faster guess = more points), per the
  *     design ("+900 / 4.8s"), replacing the earlier rank-based model.
- *   - Author points are PROPORTIONAL to how many players solve the clue, per
- *     the design ("+650 for a clue everyone solved"). This intentionally
- *     overrides the original brief's "Goldilocks" curve (which zeroed out
- *     too-obvious clues) — product decision: reward clues that land.
+ *   - Author points are TIME-WEIGHTED PER SOLVER: every solve pays, and a solve
+ *     that took a while pays more than an instant one. See `authorPoints`.
  */
 
 export interface ScoringConfig {
@@ -16,15 +14,27 @@ export interface ScoringConfig {
   guesserMax: number;
   /** floor points for a correct guess right at the buzzer */
   guesserMin: number;
-  /** author points earned per player who solves the clue */
-  authorPerSolve: number;
+  /** author points for a solve that lands instantly (the gimme clue) */
+  authorSolveBase: number;
+  /** extra author points as a solve drifts toward the buzzer */
+  authorSolveSpan: number;
+  /** author points per player who bumps the clue */
+  bumpPoints: number;
 }
 
 export const DEFAULT_SCORING: ScoringConfig = {
   guesserMax: 1000,
   guesserMin: 150,
-  authorPerSolve: 130, // 5 solvers -> 650, matching the design's example
+  authorSolveBase: 100,
+  authorSolveSpan: 150,
+  bumpPoints: 50,
 };
+
+/** Fraction of the guess window a solve consumed, clamped to [0,1]. */
+function elapsedFraction(elapsedMs: number, windowMs: number): number {
+  if (windowMs <= 0) return 0;
+  return Math.max(0, Math.min(1, elapsedMs / windowMs));
+}
 
 /**
  * Time-weighted guesser points: linear decay from `guesserMax` at reveal to
@@ -41,9 +51,46 @@ export function guesserPoints(
 }
 
 /**
- * Author points: proportional to the number of players who solved the clue.
- * More solvers -> more points (rewards a clue that lands with the group).
+ * What one solve is worth to the clue's author: `base` for an instant solve,
+ * rising to `base + span` for one that lands at the buzzer.
+ *
+ * This is the incentive that makes the game about cluing craft. A flat
+ * per-solve rate makes the most literal clue you can build (🦁👑) strictly
+ * optimal, which is the exact "type the answer as a picture" failure that
+ * `docs/content-guidelines.md` rejects whole content categories for. Weighting
+ * by *how long the solve took* puts a second dial on the author: they want
+ * everyone to get there, but not instantly.
+ *
+ * Deliberately monotonic in time as well as in solver count, so a solve is
+ * never worth less than nothing to you. That is what the old "Goldilocks"
+ * curve got wrong — it could zero out a clue after players did the work, which
+ * felt like a punishment. Here the floor is `base` and every solve adds to it.
  */
-export function authorPoints(solvedCount: number, cfg: ScoringConfig = DEFAULT_SCORING): number {
-  return Math.max(0, Math.round(cfg.authorPerSolve * solvedCount));
+export function authorPointsForSolve(
+  elapsedMs: number,
+  windowMs: number,
+  cfg: ScoringConfig = DEFAULT_SCORING,
+): number {
+  return Math.round(
+    cfg.authorSolveBase + cfg.authorSolveSpan * elapsedFraction(elapsedMs, windowMs),
+  );
+}
+
+/**
+ * Author points for a clue: the sum over everyone who solved it. More solvers
+ * is always better; solvers who had to work for it are better still.
+ */
+export function authorPoints(
+  solves: Iterable<{ ms: number }>,
+  windowMs: number,
+  cfg: ScoringConfig = DEFAULT_SCORING,
+): number {
+  let total = 0;
+  for (const solve of solves) total += authorPointsForSolve(solve.ms, windowMs, cfg);
+  return total;
+}
+
+/** Author bonus for players who bumped the clue on the reveal. */
+export function bumpAward(bumpCount: number, cfg: ScoringConfig = DEFAULT_SCORING): number {
+  return Math.max(0, Math.round(cfg.bumpPoints * bumpCount));
 }
