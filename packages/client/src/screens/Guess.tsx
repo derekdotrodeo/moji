@@ -447,6 +447,16 @@ function GuessInput({
   onSubmit: (text: string) => void;
 }) {
   const [text, setText] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Focus when the window opens, not on mount: this input is already mounted —
+  // disabled — through the CLUE_REVEAL beat, and stays mounted from one clue to
+  // the next, so `autoFocus` fires at most once and never when it matters.
+  // Keying off `disabled` re-focuses at the start of every clue.
+  useEffect(() => {
+    if (!disabled) inputRef.current?.focus();
+  }, [disabled]);
+
   const send = () => {
     const t = text.trim();
     if (!t) return;
@@ -462,7 +472,7 @@ function GuessInput({
         disabled={disabled}
         placeholder={disabled ? 'get ready…' : 'type your guess…'}
         className="w-full rounded-tile border-2 border-hairline2 bg-inset px-4 py-2.5 outline-none focus:border-lime disabled:opacity-50"
-        autoFocus
+        ref={inputRef}
       />
       <StickerButton variant="lime" onClick={send} disabled={disabled} aria-label="send guess">
         ↑

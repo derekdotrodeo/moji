@@ -524,7 +524,7 @@ export class Room {
     this.assignmentCategories.clear();
     this.reshufflesUsed.clear();
     this.roundResults = null;
-    this.guessFeed = [];
+    this.guessFeed = []; // also cleared per clue in playNext()
 
     const playerIds = [...this.players.values()]
       .filter((p) => p.role === 'player')
@@ -608,6 +608,10 @@ export class Room {
       hintShown: 0,
     };
     for (const p of this.players.values()) p.guessedThisClue = new Set();
+    // Per CLUE, not per round: the feed is scoped to the clue being played, and
+    // clients seed from it on join/reconnect. Left per-round it would hand a
+    // late joiner the previous clue's guesses.
+    this.guessFeed = [];
     this.transition('CLUE_REVEAL', CLUE_REVEAL_MS, () => this.startGuessing());
   }
 

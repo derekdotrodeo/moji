@@ -867,3 +867,41 @@ describe('Room mixed pack mode', () => {
     expect(view.activeClue?.category?.name).toBe('Movies');
   });
 });
+
+describe('Room guess feed scope', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("scopes the feed to the clue being played, not the round", () => {
+    // Clients seed their feed from this snapshot on join/reconnect, so carrying
+    // clue 1's guesses into clue 2 would show a late joiner the wrong list.
+    const { room, a, b } = roomAtGuessing();
+    room.submitGuess(b.id, 'wrong on the first clue');
+    expect(room.getSnapshot().guessFeed.map((g) => g.text)).toEqual([
+      'wrong on the first clue',
+    ]);
+
+    // Solve clue 1 so it ends early, then run on into the next clue.
+    vi.advanceTimersByTime(600); // clear the rate-limit window
+    room.submitGuess(b.id, 'Titanic');
+    expect(room.phase).toBe('CLUE_SCORING');
+    vi.advanceTimersByTime(10000);
+
+    const snap = room.getSnapshot();
+    expect(snap.active?.authorId).not.toBe(a.id);
+    expect(snap.guessFeed).toEqual([]);
+  });
+
+  it('keeps every incorrect guess in the feed, with its text intact', () => {
+    const { room, b } = roomAtGuessing();
+    room.submitGuess(b.id, 'Inception');
+    const feed = room.getSnapshot().guessFeed;
+    expect(feed).toHaveLength(1);
+    expect(feed[0]).toMatchObject({
+      guesserId: b.id,
+      guesserName: 'Bob',
+      text: 'Inception',
+      isCorrect: false,
+    });
+  });
+});

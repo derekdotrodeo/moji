@@ -35,6 +35,15 @@ export interface GameClient {
   clearError(): void;
 }
 
+/** Union of the live guess stream and the snapshot's, oldest first, deduped by id. */
+function mergeFeed(local: PublicGuess[], snapshot: PublicGuess[]): PublicGuess[] {
+  const byId = new Map(snapshot.map((g) => [g.id, g]));
+  for (const g of local) if (!byId.has(g.id)) byId.set(g.id, g);
+  return [...byId.values()]
+    .sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))
+    .slice(-100);
+}
+
 export function useGame(): GameClient {
   const [connected, setConnected] = useState(socket.connected);
   const [view, setView] = useState<RoomView | null>(null);
@@ -53,10 +62,19 @@ export function useGame(): GameClient {
       const author = next.activeClue?.authorId ?? null;
       if (author !== activeAuthorRef.current) {
         activeAuthorRef.current = author;
-        setFeed([]);
+        // Seed from the snapshot rather than emptying: `guess:new` only reaches
+        // clients that were connected when it fired, so a player who joined,
+        // reloaded, or reconnected mid-clue would otherwise stare at an empty
+        // feed until somebody guessed again. The server scopes guessFeed to the
+        // current clue, so this can't drag in the previous one's guesses.
+        setFeed(next.guessFeed);
         setChat(next.clueChat);
         setHint(next.activeClue?.hint ?? null);
       } else {
+        // Same clue: union the snapshot with what the live stream gave us.
+        // Neither is a superset — the snapshot can be a tick behind the events,
+        // and the events miss anything from before we connected.
+        setFeed((cur) => mergeFeed(cur, next.guessFeed));
         // The snapshot is authoritative for chat: it is empty until we're
         // entitled to it, then arrives whole (on solving, or on the reveal).
         setChat(next.clueChat);
