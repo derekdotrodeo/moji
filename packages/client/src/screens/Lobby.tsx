@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Player, RoomView } from '@moji/shared';
+import type { Pack, Player, RoomView } from '@moji/shared';
 import type { GameClient } from '../useGame.js';
 import { Avatar, Eyebrow, Panel, Segmented, StickerButton, cn } from '../ui.js';
 
@@ -15,7 +15,10 @@ export function LobbyScreen({ game, view }: { game: GameClient; view: RoomView }
   const readyCount = players.filter((p) => p.ready).length;
   const canStart = players.length >= 2;
 
-  const packOptions = [{ slug: '', name: 'Surprise', emoji: '🎲' }, ...view.packs];
+  // Packs are grouped under their family heading — there are ~15 of them, and a
+  // flat pill wrap is a wall in a sidebar this narrow. 'Surprise' stays pinned on
+  // top as its own row: it deals a different pack each round and is the default.
+  const packGroups = groupPacks(view.packs);
 
   return (
     <div className="mx-auto max-w-5xl animate-moji-pop px-4 py-4 sm:py-6">
@@ -82,21 +85,30 @@ export function LobbyScreen({ game, view }: { game: GameClient; view: RoomView }
                 </Setting>
               )}
               <Setting label="Pack">
-                <div className="flex flex-wrap gap-2">
-                  {packOptions.map((pack) => (
-                    <button
-                      key={pack.slug}
-                      disabled={!isHost}
-                      onClick={() => game.configure({ packSlug: pack.slug })}
-                      className={cn(
-                        'rounded-pill border-[2.5px] px-3 py-1.5 text-sm transition-all disabled:opacity-50',
-                        pack.slug === view.config.packSlug
-                          ? 'border-outline bg-cyan text-outline shadow-sticker-sm'
-                          : 'border-hairline2 text-muted hover:text-paper',
-                      )}
-                    >
-                      {pack.emoji} {pack.name}
-                    </button>
+                <div className="space-y-2">
+                  <PackPill
+                    pack={{ slug: '', name: 'Surprise', emoji: '🎲', group: '' }}
+                    selected={view.config.packSlug === ''}
+                    disabled={!isHost}
+                    onSelect={() => game.configure({ packSlug: '' })}
+                  />
+                  {packGroups.map(([group, packs]) => (
+                    <div key={group}>
+                      {/* Kept even when it repeats a lone pack's name ("Video Games"):
+                          without it that pill reads as belonging to the group above. */}
+                      <Eyebrow className="mb-1 text-[10px] text-muted">{group}</Eyebrow>
+                      <div className="flex flex-wrap gap-1.5">
+                        {packs.map((pack) => (
+                          <PackPill
+                            key={pack.slug}
+                            pack={pack}
+                            selected={pack.slug === view.config.packSlug}
+                            disabled={!isHost}
+                            onSelect={() => game.configure({ packSlug: pack.slug })}
+                          />
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </Setting>
@@ -185,5 +197,44 @@ function Setting({ label, children }: { label: string; children: React.ReactNode
       <span className="text-sm text-muted">{label}</span>
       {children}
     </div>
+  );
+}
+
+/** Packs in server order, bucketed by group heading (insertion-ordered). */
+function groupPacks(packs: Pack[]): [string, Pack[]][] {
+  const groups = new Map<string, Pack[]>();
+  for (const pack of packs) {
+    const key = pack.group || 'More';
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(pack);
+    else groups.set(key, [pack]);
+  }
+  return [...groups.entries()];
+}
+
+function PackPill({
+  pack,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  pack: Pack;
+  selected: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      disabled={disabled}
+      onClick={onSelect}
+      className={cn(
+        'rounded-pill border-[2.5px] px-3 py-1.5 text-sm transition-all disabled:opacity-50',
+        selected
+          ? 'border-outline bg-cyan text-outline shadow-sticker-sm'
+          : 'border-hairline2 text-muted hover:text-paper',
+      )}
+    >
+      {pack.emoji} {pack.name}
+    </button>
   );
 }

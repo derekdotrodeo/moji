@@ -42,6 +42,8 @@ export interface Pack {
   slug: string;
   name: string;
   emoji: string;
+  /** lobby heading this pack is listed under (e.g. 'Screen', 'Stories') */
+  group: string;
 }
 
 export interface RoomConfig {

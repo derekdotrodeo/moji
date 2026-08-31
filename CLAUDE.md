@@ -61,6 +61,15 @@ Break these only on purpose.
   query never throws: a database that is down yields nulls and the client renders nothing. It
   renders nothing at zero, too. That slot previously held a hardcoded `128,402`, and a fake number
   on a public site is the kind of detail that turns a launch thread into a thread about the author.
+- **A pack is a hint, not a boundary.** The pack name is on screen while people race, so it is the
+  one free hint every guesser gets, and its job is to *narrow scope* — nothing more. Packs are
+  therefore the leaf `category` (17 of them, registry in `PACKS`), not the four umbrellas, which are
+  now just lobby headings: "Stories" spanning nursery rhymes to *Crime and Punishment* narrowed
+  nothing. A title being reachable from two packs is fine and expected — *Twister* is a disaster
+  film and a party game, *Bohemian Rhapsody* is a song and a biopic. Do **not** add rules to keep
+  packs disjoint. The single thing that actually breaks a round is the same answer being dealt
+  twice *within one round*, so `seedData.ts` dedupes each pack by answer and `content/packs.test.ts`
+  asserts the result. Reject a pack for being uselessly wide, not for overlapping its neighbour.
 - **Game phases:** LOBBY → ROUND_INTRO → PROMPT_ASSIGNMENT → CLUE_CREATION → CLUE_REVEAL →
   GUESSING → CLUE_SCORING → ROUND_RESULTS → GAME_RESULTS → ROOM_CLOSED (`packages/shared/src/types.ts`).
 - **Defaults:** 3 rounds, 60s clue creation, 30s guessing, 3 prompt swaps at 150 points each
@@ -77,6 +86,23 @@ prompt is the whole game, and it is not obvious from the data file.
 
 The first playtest went well (August 2026). Current work: fixing bugs surfaced in play, and
 adding content.
+
+The pack split (August 2026) went from 4 umbrellas to 17 packs, and added **Songs** (77) and
+**Toys & Board Games** (57) to broaden Pop Culture past Disney + superheroes. **Stage & Musicals**
+(26) is the thinnest against a full 8-player, 3-round table (24 distinct prompts);
+`content/packs.test.ts` fails if any pack drops under 24, so the fix when it trips is content, not a
+lower threshold.
+
+**Bands was sampled and rejected**, by the same logic as FOOD in the content guidelines: band names
+split into the trivially literal (Guns N' Roses 🔫🌹, Red Hot Chili Peppers 🌶️, Queen 👑, Coldplay)
+and bare proper nouns with no imagery at all. Both halves fail, in opposite directions.
+
+**Open: a prompt can only live in one pack.** `prompts.categoryId` is a single FK and the seeder
+keys prompt identity by `answer`, so a title can't yet be reached from two packs even though the
+design wants that. Four real cases were dropped from the new packs on exactly this: *Twister*,
+*Bohemian Rhapsody*, *My Little Pony*, *Care Bears* — each already filed as a film or a TV show.
+Fixing it means a `prompt_categories` join table plus a `ContentProvider` load change; the pack
+registry already supports a leaf feeding several packs, so nothing above the DB seam needs to move.
 
 A design review after that playtest drove the incentive pass above (time-weighted author points,
 paid prompt swaps, the 0.4 hint fraction, the solved state / chat / bump). Two of its larger ideas

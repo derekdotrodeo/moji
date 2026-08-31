@@ -5,7 +5,7 @@ How Moji's prompts are stored, and — more importantly — what makes a prompt 
 ## Where content lives
 
 `packages/server/src/content/database/prompt-database.ts` is the **source of truth**: one curated
-array (`PROMPT_DATABASE`, ~1000 entries) that everything else derives from.
+array (`PROMPT_DATABASE`, ~1150 entries) that everything else derives from.
 
 - `content/seedData.ts` groups it into the selectable lobby packs.
 - `db/seedDatabase.ts` inserts/reconciles it into Postgres (`npm run db:seed`).
@@ -21,21 +21,59 @@ Add or edit content by editing the database file and re-seeding. Never hand-writ
 |---|---|
 | `answer` | The canonical answer text. |
 | `aliases` | Accepted alternates — short forms, alt spellings, US/UK titles. These become accepted guesses (`game/guessMatching.ts` matches the whole answer or a curated alias). |
-| `umbrella` | `Screen` \| `Stories` \| `Pop Culture` \| `Video Games` — the **selectable lobby pack**. Dealing happens at this level. |
-| `category` | The leaf ("Animated TV", "Fairy Tales", "Disney"). Metadata for curation only; unused in gameplay. |
+| `category` | The leaf ("Animated TV", "Fairy Tales", "Disney"). **Rounds are dealt at this level**, and the pack name is shown to guessers. |
+| `umbrella` | `Screen` \| `Stories` \| `Pop Culture` \| `Video Games` — the family the leaf belongs to. Display grouping only: the lobby heading its pack pill sits under. |
 | `difficulty` | 1–5. |
 | `recognition` | 1–10 — will the room know it? |
 | `emoji` | 1–10 — can it be built from emoji at all? |
 | `multiPath` | 1–10 — are there several *different* ways to clue it? |
 | `total` | Sum of the three 1–10 scores. The array is sorted by `total` desc, tie-broken by `recognition`. |
 
-Current umbrellas: **Screen** (movies + TV), **Stories** (novels, children's books, theater, fairy
-tales, nursery rhymes), **Pop Culture** (Disney + superheroes), **Video Games** (consoles, arcades,
-mobile, indies).
+### Packs
 
-Adding an umbrella takes three edits: the `Umbrella` union in the database file, an entry in
-`seedData.ts`, and a pack emoji in `ContentProvider.ts`. The lobby renders packs from `view.packs`,
-so no client change is needed.
+`PACKS` in the database file is the registry of **selectable lobby packs** — 15 of them, grouped
+under the four umbrellas. Each pack names the leaf `category` values it deals from. Most are one
+leaf; two merge several, both deliberately:
+
+- **Songs** and **Toys & Board Games** broaden Pop Culture past Disney + superheroes. **Bands** was
+  sampled and rejected on the FOOD rule: band names split into the trivially literal (Guns N' Roses
+  🔫🌹, Red Hot Chili Peppers 🌶️, Queen 👑) and bare proper nouns with no imagery. Songs avoid this
+  because a title is a phrase — but curate away from the ones that *are* their own emoji (Umbrella,
+  Firework, Yellow Submarine, Purple Rain).
+- **Fairy Tales & Rhymes** = Fairy Tales + Nursery Rhymes. The pre-literacy oral canon reads as one
+  thing to a player, and neither leaf (39, 35) is comfortably big enough to deal a game alone.
+- **Video Games** = all 13 game leaves. Each holds 2–12 entries — far too few to deal a round — and
+  the boundaries (Nintendo vs Platformers vs Action Adventure) are curator distinctions a guesser
+  can't use anyway.
+
+Adding a pack is one edit: an entry in `PACKS`. `seedData.ts`, the seeder, `ContentProvider`, and
+the lobby all derive from it, and `content/packs.test.ts` fails if a leaf ends up in no pack (making
+it silently undealable) or in two. Renames and regroupings are code edits, not migrations — the
+`categories` table stores only slug and name, and the seeder re-homes moved prompts on the next run.
+
+### A pack is a hint, not a boundary
+
+The pack name is on screen while people race (`view.category.name`, on the Guess screen), so it is
+the one hint every guesser gets for free. Its job is to **narrow scope**, and that is the whole of
+its job.
+
+**Narrow beats tidy.** "Stories" spanning nursery rhymes to *Crime and Punishment* gave a guesser
+nothing to work with. That's why the leaves were promoted.
+
+**Overlap is fine.** A pack is not a partition of the database. *Twister* is a disaster movie and a
+party game; *Bohemian Rhapsody* is a song and a biopic; *My Little Pony* is a cartoon and a toy
+aisle. A title being reachable under two labels costs nothing — it just means two different hints
+can lead to it. Don't add rules to keep packs disjoint, and don't reject a good prompt because a
+neighbouring pack could also claim it.
+
+**The one real failure is a repeat inside a round.** If a single pack can deal the same answer to
+two players in one round, two people are cluing the same thing and the round is broken. That's the
+invariant worth protecting, and it's cheap: `seedData.ts` dedupes each pack by answer, and
+`content/packs.test.ts` asserts no pack contains a duplicate.
+
+Note the current limit: `prompts.categoryId` is a single FK and the seeder keys prompts by `answer`,
+so **one entry can only live in one pack today**. The registry already supports a leaf feeding
+several packs; per-title membership needs a `prompt_categories` join table.
 
 ## What makes a good prompt
 
@@ -75,6 +113,9 @@ rather than filtering entry by entry. It's cheaper, and it keeps the pack's char
    inside the sample, reject the category.
 5. Skip franchise entries whose obvious guess is the parent title. "Breath of the Wild" marks a
    player typing "Zelda" wrong, which punishes the room for knowing the answer.
-6. Check the title isn't already in the database under another umbrella — plenty of games are also
-   films. One entry per title; leave it where it is unless you mean to move it.
-7. Keep the array sorted by `total` desc, then `recognition` desc.
+6. One entry per *answer string* — not because overlap is bad (it isn't), but because the seeder
+   keys prompt identity by `answer`. A title that belongs in two packs stays where it is until the
+   join table lands.
+7. A new leaf category needs a `PACKS` entry (its own pack, or added to an existing one's
+   `categories`), or it will never be dealt. The test catches this.
+8. Keep the array sorted by `total` desc, then `recognition` desc.

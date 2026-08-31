@@ -9,15 +9,15 @@ import { and, eq } from 'drizzle-orm';
 import type { Pack } from '@moji/shared';
 import type { Db } from '../db/client.js';
 import { categories as categoriesTbl, promptAnswers, prompts } from '../db/schema.js';
+import { PACKS } from './database/prompt-database.js';
 import { SEED_CATEGORIES } from './seedData.js';
 
-/** Display emoji per content pack (keyed by umbrella slug). */
-const PACK_EMOJI: Record<string, string> = {
-  screen: '🎬',
-  stories: '📚',
-  pop_culture: '🦸',
-  video_games: '🎮',
-};
+/**
+ * Pack display metadata (emoji + lobby heading), keyed by slug. Lives in the
+ * PACKS registry rather than the `categories` table so a rename or a regrouping
+ * is a code edit, not a migration; the DB only supplies slug and name.
+ */
+const PACK_META = new Map(PACKS.map((p) => [p.slug, p]));
 
 export interface PromptForPlay {
   id: string | null; // null when sourced from the bundled fallback
@@ -107,13 +107,25 @@ export class ContentProvider {
     return [...this.byCategory.values()].map((c) => ({ slug: c.slug, name: c.name }));
   }
 
-  /** Host-selectable content packs (one per active category for now). */
+  /**
+   * Host-selectable content packs, in PACKS registry order so the lobby's
+   * headings stay contiguous. A category with no registry entry (a stale row in
+   * the DB) still ships, ungrouped, rather than vanishing from the picker.
+   */
   packs(): Pack[] {
-    return [...this.byCategory.values()].map((c) => ({
-      slug: c.slug,
-      name: c.name,
-      emoji: PACK_EMOJI[c.slug] ?? '🎲',
-    }));
+    const order = [...PACK_META.keys()];
+    return [...this.byCategory.values()]
+      .sort((a, b) => {
+        const ai = order.indexOf(a.slug);
+        const bi = order.indexOf(b.slug);
+        return (ai < 0 ? order.length : ai) - (bi < 0 ? order.length : bi);
+      })
+      .map((c) => ({
+        slug: c.slug,
+        name: c.name,
+        emoji: PACK_META.get(c.slug)?.emoji ?? '🎲',
+        group: PACK_META.get(c.slug)?.group ?? 'More',
+      }));
   }
 
   /** Resolve a selected pack to the category slugs to deal from ('' = any). */
