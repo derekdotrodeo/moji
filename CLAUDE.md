@@ -70,11 +70,22 @@ Break these only on purpose.
   packs disjoint. The single thing that actually breaks a round is the same answer being dealt
   twice *within one round*, so `seedData.ts` dedupes each pack by answer and `content/packs.test.ts`
   asserts the result. Reject a pack for being uselessly wide, not for overlapping its neighbour.
+- **Pack labels are per-clue, never per-round.** `RoomConfig.packMode` is `'shared'` (one pack for
+  the round) or `'mixed'` (every player draws from a *different* pack — 3 rounds × 4 players touches
+  12 packs instead of 3; `packSlug` is ignored there). Under `'mixed'` there is no round pack, so
+  `RoomView.category` is **null** and reading it is a bug: use `yourCategory` (the pack YOUR prompt
+  came from — Prompt/Create screens) and `activeClue.category` (the pack THAT CLUE came from — the
+  Guess screen). Both are also correct under `'shared'`, where they equal the round pack, so there
+  is one code path and no mode branch — write new pack-facing UI against them and it works in both.
+  The failure this prevents is quiet: `view.category` on the Guess screen renders fine, and shows a
+  guesser their *own* pack as the hint for someone else's clue. Same rule server-side —
+  `Room.reshufflePrompt` draws from `assignmentCategories.get(playerId)`, not `this.category`, or a
+  swap moves you into a pack your guessers were never told about.
 - **Game phases:** LOBBY → ROUND_INTRO → PROMPT_ASSIGNMENT → CLUE_CREATION → CLUE_REVEAL →
   GUESSING → CLUE_SCORING → ROUND_RESULTS → GAME_RESULTS → ROOM_CLOSED (`packages/shared/src/types.ts`).
-- **Defaults:** 3 rounds, 60s clue creation, 30s guessing, 3 prompt swaps at 150 points each
-  (`DEFAULT_ROOM_CONFIG`). Three rounds is a playtest-tuned choice for snappier first games; the
-  host can raise it.
+- **Defaults:** 3 rounds, 60s clue creation, 30s guessing, 3 prompt swaps at 150 points each,
+  `packMode: 'shared'` (`DEFAULT_ROOM_CONFIG`). Three rounds is a playtest-tuned choice for snappier
+  first games; the host can raise it.
 
 ## Content
 
@@ -103,6 +114,12 @@ design wants that. Four real cases were dropped from the new packs on exactly th
 *Bohemian Rhapsody*, *My Little Pony*, *Care Bears* — each already filed as a film or a TV show.
 Fixing it means a `prompt_categories` join table plus a `ContentProvider` load change; the pack
 registry already supports a leaf feeding several packs, so nothing above the DB seam needs to move.
+Deliberately deferred (August 2026) — the packs are big enough without those four.
+
+**Mixed pack mode is built** (`packMode`, see the pack-label invariant above). It solves *variety*
+— how much of the library a game touches — and leaves the serial playback loop untouched, so it is
+orthogonal to Blitz below, which is about *pacing*. The two compose; neither is a substitute for
+the other.
 
 A design review after that playtest drove the incentive pass above (time-weighted author points,
 paid prompt swaps, the 0.4 hint fraction, the solved state / chat / bump). Two of its larger ideas
