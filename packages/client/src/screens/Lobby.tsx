@@ -19,6 +19,9 @@ export function LobbyScreen({ game, view }: { game: GameClient; view: RoomView }
   // flat pill wrap is a wall in a sidebar this narrow. 'Surprise' stays pinned on
   // top as its own row: it deals a different pack each round and is the default.
   const packGroups = groupPacks(view.packs);
+  // In 'mixed' mode packSlug is ignored server-side, so offering the picker
+  // would be a control that silently does nothing.
+  const mixed = view.config.packMode === 'mixed';
 
   return (
     <div className="mx-auto max-w-5xl animate-moji-pop px-4 py-4 sm:py-6">
@@ -84,6 +87,24 @@ export function LobbyScreen({ game, view }: { game: GameClient; view: RoomView }
                   />
                 </Setting>
               )}
+              <Setting label="Pack mode">
+                <Segmented
+                  options={[
+                    { label: 'Shared', value: 'shared' as const },
+                    { label: 'Mixed', value: 'mixed' as const },
+                  ]}
+                  value={view.config.packMode}
+                  disabled={!isHost}
+                  onChange={(packMode) => game.configure({ packMode })}
+                />
+              </Setting>
+              {mixed ? (
+                <p className="text-xs text-muted">
+                  🎁 Every player gets a prompt from a <em>different</em> pack, so a{' '}
+                  {view.config.rounds}-round game touches up to{' '}
+                  {view.config.rounds * Math.max(players.length, 1)} of them.
+                </p>
+              ) : (
               <Setting label="Pack">
                 <div className="space-y-2">
                   <PackPill
@@ -112,6 +133,7 @@ export function LobbyScreen({ game, view }: { game: GameClient; view: RoomView }
                   ))}
                 </div>
               </Setting>
+              )}
             </div>
           </div>
 

@@ -5,14 +5,19 @@ import { Eyebrow, cn } from '../ui.js';
 
 const PROMPT_TOTAL_MS = 3100; // matches the server PROMPT_ASSIGNMENT phase
 
-function categoryEmoji(view: RoomView): string {
-  return view.packs.find((p) => p.slug === view.category?.slug)?.emoji ?? '🎬';
+function packEmoji(view: RoomView, slug: string | undefined): string {
+  return view.packs.find((p) => p.slug === slug)?.emoji ?? '🎬';
 }
 
+/**
+ * The pack badge. Shows YOUR pack, which in 'mixed' mode differs from everyone
+ * else's — `view.category` is null there, so reading it would render blank.
+ */
 function CategoryBadge({ view }: { view: RoomView }) {
+  const cat = view.yourCategory ?? view.category;
   return (
     <span className="inline-flex -rotate-2 items-center gap-2 rounded-pill border-[2.5px] border-outline bg-cyan px-4 py-1.5 font-mono text-sm font-bold uppercase tracking-[2px] text-outline shadow-sticker-sm">
-      {categoryEmoji(view)} {view.category?.name ?? ''}
+      {packEmoji(view, cat?.slug)} {cat?.name ?? ''}
     </span>
   );
 }
@@ -23,7 +28,13 @@ export function RoundIntro({ view }: { view: RoomView }) {
     <div className="mx-auto flex min-h-screen max-w-md animate-moji-pop flex-col items-center justify-center px-4 text-center">
       <Eyebrow className="text-cyan">Round {view.roundNumber}</Eyebrow>
       <div className="my-4">
-        <CategoryBadge view={view} />
+        {view.config.packMode === 'mixed' ? (
+          <span className="inline-flex -rotate-2 items-center gap-2 rounded-pill border-[2.5px] border-outline bg-lime px-4 py-1.5 font-mono text-sm font-bold uppercase tracking-[2px] text-outline shadow-sticker-sm">
+            🎁 Everyone gets a different pack
+          </span>
+        ) : (
+          <CategoryBadge view={view} />
+        )}
       </div>
       <div className="font-display text-2xl font-extrabold text-muted">get ready…</div>
     </div>

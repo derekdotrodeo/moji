@@ -25,7 +25,7 @@ export function SplashScreen({ view }: { view: RoomView }) {
         Round {view.roundNumber}
       </div>
       <div className="mt-2 font-display text-4xl font-extrabold">
-        {view.category?.name ?? 'Get ready'}
+        {view.category?.name ?? (view.config.packMode === 'mixed' ? 'Mixed packs' : 'Get ready')}
       </div>
       <div className="mt-4 text-muted">Dealing prompts…</div>
     </div>

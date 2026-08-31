@@ -56,6 +56,7 @@ function snapshot(phase: GamePhase, opts: SnapOpts = {}): RoomSnapshot {
       clueCreationSeconds: 90,
       guessingSeconds: 40,
       packSlug: '',
+      packMode: 'shared',
       reshuffles: 3,
       reshuffleCost: 150,
     },
@@ -68,6 +69,10 @@ function snapshot(phase: GamePhase, opts: SnapOpts = {}): RoomSnapshot {
       ['A', 'Titanic'],
       ['B', 'Pizza'],
     ]),
+    assignmentCategories: new Map([
+      ['A', { slug: 'movies', name: 'Movies' }],
+      ['B', { slug: 'toys', name: 'Toys & Board Games' }],
+    ]),
     submittedAuthorIds: new Set(['A', 'B']),
     reshufflesUsed: new Map<string, number>(),
     active: {
@@ -76,6 +81,7 @@ function snapshot(phase: GamePhase, opts: SnapOpts = {}): RoomSnapshot {
       authorAvatar: '😎',
       emojis: ['🚢', '🧊'],
       answer: 'Titanic',
+      category: { slug: 'movies', name: 'Movies' },
       solvedCount: opts.solves?.length ?? 0,
       eligibleCount: 2,
       solves: opts.solves ?? [],
@@ -220,5 +226,35 @@ describe('serializeRoomFor — prompt swaps', () => {
     snap.reshufflesUsed.set('B', 3);
     snap.submittedAuthorIds = new Set();
     expect(serializeRoomFor(snap, 'B').youCanReshuffle).toBe(false);
+  });
+});
+
+describe('serializeRoomFor — pack labels', () => {
+  // Packs are hints, not secrets: the whole point of naming one is to narrow the
+  // answer space for guessers. These pin that they travel, and that the
+  // per-player one is genuinely per-player (it differs by recipient in 'mixed').
+  it("gives each player their own pack, not another player's", () => {
+    const snap = snapshot('CLUE_CREATION');
+    expect(serializeRoomFor(snap, 'A').yourCategory?.name).toBe('Movies');
+    expect(serializeRoomFor(snap, 'B').yourCategory?.name).toBe('Toys & Board Games');
+  });
+
+  it('omits yourCategory for someone with no prompt this round', () => {
+    expect(serializeRoomFor(snapshot('CLUE_CREATION'), 'C').yourCategory).toBeNull();
+  });
+
+  it("labels the active clue with the author's pack for every recipient", () => {
+    const snap = snapshot('GUESSING');
+    for (const id of ['A', 'B', 'C']) {
+      expect(serializeRoomFor(snap, id).activeClue?.category?.name).toBe('Movies');
+    }
+  });
+
+  it('still hides the answer from the guesser it just handed a pack name', () => {
+    // The pack narrows to a pack's worth of titles; it must not come with more.
+    const view = serializeRoomFor(snapshot('GUESSING'), 'B');
+    expect(view.activeClue?.category?.name).toBe('Movies');
+    expect(view.activeClue?.answer).toBeNull();
+    expect(JSON.stringify(view)).not.toContain('Titanic');
   });
 });

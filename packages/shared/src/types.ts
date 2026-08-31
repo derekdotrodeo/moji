@@ -46,6 +46,8 @@ export interface Pack {
   group: string;
 }
 
+export type PackMode = 'shared' | 'mixed';
+
 export interface RoomConfig {
   rounds: number;
   /** seconds */
@@ -54,6 +56,14 @@ export interface RoomConfig {
   guessingSeconds: number;
   /** selected content pack; '' = any active content */
   packSlug: string;
+  /**
+   * How packs are handed out each round.
+   *  'shared' — one pack for the whole round; everyone clues from it.
+   *  'mixed'  — every player draws from a *different* pack, so a 3-round game
+   *             with 4 players touches 12 packs instead of 3. `packSlug` is
+   *             ignored here: the mode's whole point is spanning the library.
+   */
+  packMode: PackMode;
   /** prompt swaps each player gets per round; 0 turns the feature off */
   reshuffles: number;
   /** score charged for each prompt swap; 0 makes swapping free */
@@ -65,6 +75,7 @@ export const DEFAULT_ROOM_CONFIG: RoomConfig = {
   clueCreationSeconds: 60,
   guessingSeconds: 30, // design default (20 / [30] / 45)
   packSlug: '',
+  packMode: 'shared',
   reshuffles: 3,
   reshuffleCost: 150, // a swap is a real choice, not a free reroll
 };
@@ -148,8 +159,14 @@ export interface RoomView {
   players: Player[];
   hostId: string;
   roundNumber: number;
-  /** category for the current round (public) */
+  /**
+   * Pack for the current round (public). Null in 'mixed' mode, where there is
+   * no single round pack — read `yourCategory` and `activeClue.category`
+   * instead, both of which are correct in either mode.
+   */
   category: CategorySummary | null;
+  /** The pack YOUR prompt was drawn from this round. */
+  yourCategory: CategorySummary | null;
 
   /** Your own secret prompt for the current round — only set for you. */
   yourPrompt: string | null;
@@ -179,6 +196,13 @@ export interface RoomView {
 
 export interface ActiveClueView {
   authorId: string;
+  /**
+   * The pack this clue's answer came from — the guesser's one free hint, and
+   * per-clue rather than per-round so it stays right in 'mixed' mode. Public by
+   * design: naming the pack is the point, and it only narrows to a pack's worth
+   * of titles, never to the answer.
+   */
+  category: CategorySummary | null;
   authorName: string;
   authorAvatar: string;
   emojis: string[];

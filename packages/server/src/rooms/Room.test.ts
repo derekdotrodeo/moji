@@ -768,3 +768,102 @@ describe('Room solvers chat', () => {
     expect(room.getSnapshot().active?.chat).toEqual([]);
   });
 });
+
+// ── mixed pack mode ────────────────────────────────────────────────────────
+// Each player draws from a *different* pack, so there is no round-level pack
+// and every pack-facing read has to be per-player or per-clue instead.
+const MIXED_PROMPTS: Record<string, PromptForPlay> = {
+  songs: { id: 'm1', answer: 'Thriller', accepted: ['Thriller'], blocklist: [], difficulty: 1 },
+  toys: { id: 'm2', answer: 'Jenga', accepted: ['Jenga'], blocklist: [], difficulty: 1 },
+};
+
+const mixedContent = {
+  dealMixedRound: () => [
+    { category: { slug: 'songs', name: 'Songs' }, prompt: MIXED_PROMPTS.songs! },
+    { category: { slug: 'toys', name: 'Toys & Board Games' }, prompt: MIXED_PROMPTS.toys! },
+  ],
+  dealRound: () => ({ category: { slug: 'movies', name: 'Movies' }, assignments: PROMPTS }),
+  packs: () => [
+    { slug: 'songs', name: 'Songs', emoji: '🎵', group: 'Pop Culture' },
+    { slug: 'toys', name: 'Toys & Board Games', emoji: '🪀', group: 'Pop Culture' },
+  ],
+  categorySlugsForPack: () => [],
+  // Records which pack a swap was drawn from, so the test can assert a swap
+  // never moves a player out of the pack their guessers were told about.
+  drawOne: (slug: string) => ({
+    id: `swap-${slug}`,
+    answer: `Swapped ${slug}`,
+    accepted: [`Swapped ${slug}`],
+    blocklist: [],
+    difficulty: 1,
+  }),
+} as unknown as ContentProvider;
+
+function mixedRoomAtGuessing(): { room: Room; a: Player; b: Player } {
+  const room = new Room('MIXD', {
+    content: mixedContent,
+    scoring: DEFAULT_SCORING,
+    rng: () => 0.5,
+    hooks: noopHooks,
+  });
+  const a = room.addPlayer('Alice', 'player');
+  const b = room.addPlayer('Bob', 'player');
+  room.configure(a.id, { packMode: 'mixed' });
+  room.start(a.id);
+  vi.advanceTimersByTime(2000 + 3100);
+  return { room, a, b };
+}
+
+describe('Room mixed pack mode', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('gives each player a prompt from a different pack', () => {
+    const { room, a, b } = mixedRoomAtGuessing();
+    const va = serializeRoomFor(room.getSnapshot(), a.id);
+    const vb = serializeRoomFor(room.getSnapshot(), b.id);
+
+    expect(va.yourPrompt).toBe('Thriller');
+    expect(vb.yourPrompt).toBe('Jenga');
+    expect(va.yourCategory?.name).toBe('Songs');
+    expect(vb.yourCategory?.name).toBe('Toys & Board Games');
+    expect(va.yourCategory?.slug).not.toBe(vb.yourCategory?.slug);
+  });
+
+  it('has no round-level pack, so clients must read the per-player one', () => {
+    const { room, a } = mixedRoomAtGuessing();
+    expect(serializeRoomFor(room.getSnapshot(), a.id).category).toBeNull();
+  });
+
+  it("labels the active clue with its own author's pack", () => {
+    const { room, a, b } = mixedRoomAtGuessing();
+    room.submitClue(a.id, ['💀', '🕺']);
+    room.submitClue(b.id, ['🧱', '🗼']);
+    vi.advanceTimersByTime(1500);
+
+    // Whoever is up, the guesser is told THAT clue's pack — not the round's
+    // (there isn't one) and not their own.
+    const view = serializeRoomFor(room.getSnapshot(), b.id);
+    const authorIsAlice = view.activeClue?.authorId === a.id;
+    expect(view.activeClue?.category?.name).toBe(authorIsAlice ? 'Songs' : 'Toys & Board Games');
+  });
+
+  it("keeps a prompt swap inside the swapper's own pack", () => {
+    const { room, a, b } = mixedRoomAtGuessing();
+    room.reshufflePrompt(a.id);
+    room.reshufflePrompt(b.id);
+
+    // drawOne encodes the pack it was asked for, so this proves each player was
+    // re-drawn from their own pack rather than a shared round pack.
+    expect(serializeRoomFor(room.getSnapshot(), a.id).yourPrompt).toBe('Swapped songs');
+    expect(serializeRoomFor(room.getSnapshot(), b.id).yourPrompt).toBe('Swapped toys');
+  });
+
+  it('still labels every clue in shared mode, from the round pack', () => {
+    const { room, a } = roomAtGuessing();
+    const view = serializeRoomFor(room.getSnapshot(), a.id);
+    expect(view.category?.name).toBe('Movies');
+    expect(view.yourCategory?.name).toBe('Movies');
+    expect(view.activeClue?.category?.name).toBe('Movies');
+  });
+});

@@ -39,6 +39,12 @@ export interface DealtRound {
   assignments: PromptForPlay[];
 }
 
+/** One player's prompt plus the pack it came from ('mixed' pack mode). */
+export interface MixedAssignment {
+  category: { slug: string; name: string };
+  prompt: PromptForPlay;
+}
+
 export class ContentProvider {
   private byCategory = new Map<string, CategoryContent>();
 
@@ -156,6 +162,50 @@ export class ContentProvider {
     const shuffled = [...source].sort(() => pick() - 0.5);
     const assignments = shuffled.slice(0, count);
     return { category: { slug: cat.slug, name: cat.name }, assignments };
+  }
+
+  /**
+   * Deal a round where every player gets a prompt from a *different* pack.
+   *
+   * With more packs than players (17 vs a table of at most 8) each player lands
+   * in a pack of their own. If a room ever outgrows the library the packs cycle
+   * rather than failing — a repeated pack is a duller round, not a broken one.
+   * Prompts are deduped by answer across the whole deal, since two players
+   * cluing the same title is the one thing that actually breaks a round.
+   */
+  dealMixedRound(
+    count: number,
+    usedPromptKeys: Set<string>,
+    pick: () => number,
+  ): MixedAssignment[] | null {
+    const pool = [...this.byCategory.values()].filter((c) => c.prompts.length > 0);
+    if (pool.length === 0) return null;
+
+    const shuffled = [...pool].sort(() => pick() - 0.5);
+    const taken = new Set<string>();
+    const takenAnswers = new Set<string>();
+    const out: MixedAssignment[] = [];
+
+    for (let i = 0; i < count; i++) {
+      const cat = shuffled[i % shuffled.length]!;
+      const available = cat.prompts.filter(
+        (p) =>
+          !taken.has(promptKey(p)) &&
+          !takenAnswers.has(p.answer) &&
+          !usedPromptKeys.has(promptKey(p)),
+      );
+      // Fall back within the pack before giving up, mirroring dealRound: a pack
+      // exhausted by a long game should still deal something.
+      const source = available.length
+        ? available
+        : cat.prompts.filter((p) => !taken.has(promptKey(p)) && !takenAnswers.has(p.answer));
+      if (source.length === 0) continue;
+      const prompt = source[Math.floor(pick() * source.length)]!;
+      taken.add(promptKey(prompt));
+      takenAnswers.add(prompt.answer);
+      out.push({ category: { slug: cat.slug, name: cat.name }, prompt });
+    }
+    return out.length ? out : null;
   }
 
   /**

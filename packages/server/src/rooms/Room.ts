@@ -117,6 +117,8 @@ export interface RoomSnapshot {
   players: Player[];
   /** playerId -> their secret answer this round */
   assignments: Map<string, string>;
+  /** playerId -> the pack their prompt came from (public; a pack is a hint) */
+  assignmentCategories: Map<string, { slug: string; name: string }>;
   submittedAuthorIds: Set<string>;
   /** playerId -> prompt swaps used this round */
   reshufflesUsed: Map<string, number>;
@@ -129,6 +131,8 @@ export interface RoomSnapshot {
     solvedCount: number;
     eligibleCount: number;
     solves: ClueSolve[];
+    /** The pack the active clue's answer came from. */
+    category: { slug: string; name: string } | null;
     authorPoints: number | null;
     bumps: Set<string>;
     bumpPoints: number;
@@ -157,6 +161,10 @@ export class Room {
 
   private players = new Map<string, PlayerState>();
   private assignments = new Map<string, PromptForPlay>();
+  /** playerId -> the pack their prompt came from. Per-player because in 'mixed'
+   *  mode there is no single round pack; in 'shared' mode every entry is equal
+   *  to `this.category`, which keeps every reader on one code path. */
+  private assignmentCategories = new Map<string, { slug: string; name: string }>();
   private clues = new Map<string, string[]>(); // authorId -> emojis
   private usedPromptKeys = new Set<string>();
   private reshufflesUsed = new Map<string, number>(); // playerId -> swaps used this round
@@ -252,6 +260,7 @@ export class Room {
     if (payload.guessingSeconds !== undefined)
       this.config.guessingSeconds = clamp(payload.guessingSeconds, 15, 120);
     if (payload.packSlug !== undefined) this.config.packSlug = payload.packSlug;
+    if (payload.packMode !== undefined) this.config.packMode = payload.packMode;
     if (payload.reshuffles !== undefined) this.config.reshuffles = clamp(payload.reshuffles, 0, 5);
     if (payload.reshuffleCost !== undefined)
       this.config.reshuffleCost = clamp(payload.reshuffleCost, 0, 500);
@@ -310,10 +319,13 @@ export class Room {
           : `You've used all ${this.config.reshuffles} prompt swaps this round.`,
       );
     }
-    if (!this.category) throw new Error('No category this round.');
+    // The player's own pack, not the round's: in 'mixed' mode they differ, and
+    // a swap must never move you to a pack your guessers weren't told about.
+    const ownCategory = this.assignmentCategories.get(playerId);
+    if (!ownCategory) throw new Error('No category this round.');
 
     const replacement = this.deps.content.drawOne(
-      this.category.slug,
+      ownCategory.slug,
       this.usedPromptKeys, // excludes current assignments + everything used this game
       this.deps.rng,
     );
@@ -509,6 +521,7 @@ export class Room {
     this.roundNumber += 1;
     this.clues.clear();
     this.assignments.clear();
+    this.assignmentCategories.clear();
     this.reshufflesUsed.clear();
     this.roundResults = null;
     this.guessFeed = [];
@@ -516,22 +529,44 @@ export class Room {
     const playerIds = [...this.players.values()]
       .filter((p) => p.role === 'player')
       .map((p) => p.id);
-    const dealt = this.deps.content.dealRound(
-      this.deps.content.categorySlugsForPack(this.config.packSlug),
-      playerIds.length,
-      this.usedPromptKeys,
-      this.deps.rng,
-    );
-    if (!dealt) {
-      this.deps.hooks.onStateChange(this);
-      throw new Error('No prompt content available.');
+    if (this.config.packMode === 'mixed') {
+      // Every player draws from a different pack. No round-level pack exists,
+      // so `this.category` stays null and readers use the per-player map.
+      const dealt = this.deps.content.dealMixedRound(
+        playerIds.length,
+        this.usedPromptKeys,
+        this.deps.rng,
+      );
+      if (!dealt) {
+        this.deps.hooks.onStateChange(this);
+        throw new Error('No prompt content available.');
+      }
+      this.category = null;
+      playerIds.forEach((id, i) => {
+        const { prompt, category } = dealt[i % dealt.length]!;
+        this.assignments.set(id, prompt);
+        this.assignmentCategories.set(id, category);
+        this.usedPromptKeys.add(promptKey(prompt));
+      });
+    } else {
+      const dealt = this.deps.content.dealRound(
+        this.deps.content.categorySlugsForPack(this.config.packSlug),
+        playerIds.length,
+        this.usedPromptKeys,
+        this.deps.rng,
+      );
+      if (!dealt) {
+        this.deps.hooks.onStateChange(this);
+        throw new Error('No prompt content available.');
+      }
+      this.category = dealt.category;
+      playerIds.forEach((id, i) => {
+        const prompt = dealt.assignments[i % dealt.assignments.length]!;
+        this.assignments.set(id, prompt);
+        this.assignmentCategories.set(id, dealt.category);
+        this.usedPromptKeys.add(promptKey(prompt));
+      });
     }
-    this.category = dealt.category;
-    playerIds.forEach((id, i) => {
-      const prompt = dealt.assignments[i % dealt.assignments.length]!;
-      this.assignments.set(id, prompt);
-      this.usedPromptKeys.add(promptKey(prompt));
-    });
 
     this.transition('ROUND_INTRO', ROUND_INTRO_MS, () => this.startPromptAssignment());
   }
@@ -676,6 +711,7 @@ export class Room {
   private endGame(): void {
     this.gameResults = this.buildScoreRows();
     this.category = null;
+    this.assignmentCategories.clear();
     this.active = null;
     this.transition('GAME_RESULTS', null, null);
     // RoomManager persists the completed game from onStateChange.
@@ -806,6 +842,7 @@ export class Room {
         authorAvatar: author?.avatar ?? '❓',
         emojis: this.clues.get(this.active.authorId) ?? [],
         answer: this.assignments.get(this.active.authorId)?.answer ?? '',
+        category: this.assignmentCategories.get(this.active.authorId) ?? null,
         solvedCount: this.active.solvers.size,
         eligibleCount: this.eligibleGuessers(),
         solves: this.buildSolves(this.active),
@@ -829,6 +866,7 @@ export class Room {
       packs: this.deps.content.packs(),
       players: [...this.players.values()].map(toPublicPlayer),
       assignments,
+      assignmentCategories: new Map(this.assignmentCategories),
       submittedAuthorIds: new Set(this.clues.keys()),
       reshufflesUsed: new Map(this.reshufflesUsed),
       active,

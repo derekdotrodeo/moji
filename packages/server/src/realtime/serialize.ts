@@ -45,6 +45,11 @@ export function serializeRoomFor(snap: RoomSnapshot, recipientId: string): RoomV
     hostId: snap.hostId,
     roundNumber: snap.roundNumber,
     category: snap.category,
+    // A pack name is a hint, never a secret — it narrows to a pack's worth of
+    // titles and no further, which is exactly what it is for. Sent per-recipient
+    // only because in 'mixed' mode each player's pack differs; there is nothing
+    // here another player couldn't be told.
+    yourCategory: snap.assignmentCategories.get(recipientId) ?? null,
 
     // Secret: only the recipient's own prompt is ever included.
     yourPrompt: snap.assignments.get(recipientId) ?? null,
@@ -62,6 +67,9 @@ export function serializeRoomFor(snap: RoomSnapshot, recipientId: string): RoomV
           authorName: snap.active.authorName,
           authorAvatar: snap.active.authorAvatar,
           emojis: snap.active.emojis,
+          // Public in both modes: this is the guesser's free hint, and it must
+          // be per-clue rather than per-round or it goes wrong under 'mixed'.
+          category: snap.active.category,
           answer: activeAnswer,
           hint: snap.active.hint,
           solvedCount: snap.active.solvedCount,

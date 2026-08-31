@@ -7,7 +7,7 @@
  *   - server → client events are state pushes / notifications.
  */
 
-import type { ChatMessage, GuessResult, PublicGuess, RoomView } from './types.js';
+import type { ChatMessage, GuessResult, PackMode, PublicGuess, RoomView } from './types.js';
 
 /** Standard ack shape for commands. */
 export type Ack<T = void> = (res: AckResult<T>) => void;
@@ -38,6 +38,7 @@ export interface ConfigureRoomPayload {
   clueCreationSeconds?: number;
   guessingSeconds?: number;
   packSlug?: string;
+  packMode?: PackMode;
   reshuffles?: number;
   reshuffleCost?: number;
 }

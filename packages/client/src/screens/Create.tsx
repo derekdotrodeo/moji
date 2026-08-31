@@ -55,7 +55,7 @@ export function ClueScreen({ game, view }: { game: GameClient; view: RoomView })
       {/* Top bar: prompt recap + timer */}
       <div className="mb-5 flex items-start justify-between gap-4">
         <div>
-          <Eyebrow className="text-cyan">Clue for · {view.category?.name}</Eyebrow>
+          <Eyebrow className="text-cyan">Clue for · {(view.yourCategory ?? view.category)?.name}</Eyebrow>
           <div className="font-display text-2xl font-extrabold sm:text-3xl">{view.yourPrompt}</div>
           {view.youCanReshuffle && (
             <button
