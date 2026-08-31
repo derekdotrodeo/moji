@@ -57,14 +57,16 @@ export function GuessScreen({ game, view }: { game: GameClient; view: RoomView }
           ))}
         </div>
 
-        {!clue.youAreAuthor && !solved && guessing && game.hint && <HintBlanks hint={game.hint} />}
+        {/* Shown to EVERYONE, including the author and anyone who has already
+            solved. For them it isn't a puzzle — it's the scoreboard of the race
+            they're watching, and hiding it left them staring at a static page
+            while the round happened somewhere else. Nothing leaks: you cannot
+            be shown this without already being entitled to the answer or being
+            a guesser the mask is built for. */}
+        {guessing && game.hint && <HintBlanks hint={game.hint} />}
 
         {clue.youAreAuthor ? (
-          <p className="mt-8 text-muted">
-            This is your clue — sit back and watch the chaos 🍿
-            <br />
-            <span className="text-muted-3">(answer: {clue.answer})</span>
-          </p>
+          <AuthorBanner clue={clue} guessing={guessing} />
         ) : solved ? (
           <SolvedBanner clue={clue} onBump={() => void game.bump()} />
         ) : !guessing ? (
@@ -102,6 +104,35 @@ export function GuessScreen({ game, view }: { game: GameClient; view: RoomView }
 }
 
 /**
+ * What the clue's author sees while the clock runs. They can't guess, so the
+ * whole job is letting them watch their clue land: the blanks above are the
+ * same ones the room is staring at, and this is the live read on whether the
+ * clue is working — which is the feedback the author-points curve is paying on.
+ */
+function AuthorBanner({ clue, guessing }: { clue: ActiveClueView; guessing: boolean }) {
+  const stillGuessing = Math.max(0, clue.eligibleCount - clue.solvedCount);
+  const status = !guessing
+    ? 'sit back and watch the chaos 🍿'
+    : clue.solvedCount === 0
+      ? 'nobody has it yet…'
+      : stillGuessing > 0
+        ? `${clue.solvedCount} solved · ${stillGuessing} still guessing`
+        : 'everybody got it — nice clue';
+  return (
+    <div className="mt-6 flex flex-col items-center gap-2">
+      <p className="font-mono text-xs uppercase tracking-[1.5px] text-muted">your clue</p>
+      <p className="font-display text-2xl font-extrabold text-paper">{clue.answer}</p>
+      <p className="font-mono text-xs uppercase tracking-[1.5px] text-muted">{status}</p>
+      {clue.bumps > 0 && (
+        <span className="rounded-pill border-2 border-gold px-3 py-0.5 font-display text-sm font-extrabold text-gold">
+          👏 ×{clue.bumps}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
  * What a solver sees for the rest of the window. Three jobs: confirm the solve
  * and what it paid, show the answer they earned, and give them something to do
  * with the clue — bumping pays its author and is the only way to say "that was
@@ -110,7 +141,7 @@ export function GuessScreen({ game, view }: { game: GameClient; view: RoomView }
 function SolvedBanner({ clue, onBump }: { clue: ActiveClueView; onBump: () => void }) {
   const stillGuessing = Math.max(0, clue.eligibleCount - clue.solvedCount);
   return (
-    <div className="mt-8 flex animate-moji-pop flex-col items-center gap-3">
+    <div className="mt-6 flex animate-moji-pop flex-col items-center gap-3">
       <div className="flex items-center gap-3 rounded-sticker border-[2.5px] border-outline bg-mint px-4 py-2 text-outline shadow-sticker">
         <span className="font-display text-lg font-extrabold">got it!</span>
         <span className="rounded-pill bg-outline px-2.5 py-0.5 font-mono text-sm text-mint">
