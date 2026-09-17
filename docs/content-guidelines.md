@@ -31,7 +31,7 @@ Add or edit content by editing the database file and re-seeding. Never hand-writ
 
 ### Packs
 
-`PACKS` in the database file is the registry of **selectable lobby packs** — 15 of them, grouped
+`PACKS` in the database file is the registry of **selectable lobby packs** — 17 of them, grouped
 under the four umbrellas. Each pack names the leaf `category` values it deals from. Most are one
 leaf; two merge several, both deliberately:
 
@@ -48,14 +48,15 @@ leaf; two merge several, both deliberately:
 
 Adding a pack is one edit: an entry in `PACKS`. `seedData.ts`, the seeder, `ContentProvider`, and
 the lobby all derive from it, and `content/packs.test.ts` fails if a leaf ends up in no pack (making
-it silently undealable) or in two. Renames and regroupings are code edits, not migrations — the
-`categories` table stores only slug and name, and the seeder re-homes moved prompts on the next run.
+it silently undealable). Overlap is not an error — see below. Renames and regroupings are code edits,
+not migrations — the `categories` table stores only slug and name, and the seeder re-homes moved
+prompts on the next run.
 
 ### A pack is a hint, not a boundary
 
-The pack name is on screen while people race (`view.category.name`, on the Guess screen), so it is
-the one hint every guesser gets for free. Its job is to **narrow scope**, and that is the whole of
-its job.
+The pack name is on screen while people race (`activeClue.category`, on the Guess screen — per-clue,
+never `view.category`, which is null in `mixed` pack mode), so it is the one hint every guesser gets
+for free. Its job is to **narrow scope**, and that is the whole of its job.
 
 **Narrow beats tidy.** "Stories" spanning nursery rhymes to *Crime and Punishment* gave a guesser
 nothing to work with. That's why the leaves were promoted.
