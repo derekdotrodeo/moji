@@ -18,6 +18,17 @@ export function JoiningNextRound() {
   );
 }
 
+/** The beat between clicking "play solo" and the server dealing round 1. */
+export function DealingSolo() {
+  return (
+    <div className="mx-auto mt-24 max-w-md animate-moji-pop px-4 text-center">
+      <div className="animate-moji-float text-6xl">🤖</div>
+      <div className="mt-4 font-display text-3xl font-extrabold">Mojibot is warming up…</div>
+      <p className="mt-2 text-muted">Dealing you a secret prompt.</p>
+    </div>
+  );
+}
+
 export function SplashScreen({ view }: { view: RoomView }) {
   return (
     <div className="mx-auto mt-24 max-w-md animate-moji-pop text-center">

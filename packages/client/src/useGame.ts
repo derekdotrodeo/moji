@@ -21,6 +21,8 @@ export interface GameClient {
   error: string | null;
   myId: string | null;
   join(displayName: string, avatar: string, code?: string): Promise<JoinRoomResult>;
+  /** Start a solo game against the bot: a fresh room, already under way. */
+  joinSolo(displayName: string, avatar: string): Promise<JoinRoomResult>;
   configure(payload: ConfigureRoomPayload): Promise<void>;
   setReady(ready: boolean): Promise<void>;
   start(): Promise<void>;
@@ -121,6 +123,15 @@ export function useGame(): GameClient {
     return res;
   }, []);
 
+  const joinSolo = useCallback<GameClient['joinSolo']>(async (displayName, avatar) => {
+    // No sessionToken: solo always means a new room. Passing the old token
+    // would let the reconnect path drop us back into a finished game.
+    const res = await emitAck<JoinRoomResult>('room:join', { displayName, avatar, solo: true });
+    saveSession(res.sessionToken, displayName, avatar);
+    setMyId(res.playerId);
+    return res;
+  }, []);
+
   const configure = useCallback<GameClient['configure']>(
     (payload) => emitAck('room:configure', payload),
     [],
@@ -169,6 +180,7 @@ export function useGame(): GameClient {
     error,
     myId,
     join,
+    joinSolo,
     configure,
     setReady,
     start,

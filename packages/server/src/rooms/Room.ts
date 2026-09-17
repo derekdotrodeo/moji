@@ -37,6 +37,7 @@ import { isCorrectGuess } from '../game/guessMatching.js';
 import { env } from '../env.js';
 import type { ContentProvider, PromptForPlay } from '../content/ContentProvider.js';
 import { promptKey } from '../content/ContentProvider.js';
+import { isBotPlayable } from '../content/solo.js';
 
 const MIN_PLAYERS = 2; // design target is 4–10; relaxed for dev/testing
 const ROUND_INTRO_MS = 2000; // category banner
@@ -185,15 +186,17 @@ export class Room {
   }
 
   // ── membership ──────────────────────────────────────────────────────────
-  addPlayer(displayName: string, role: PlayerRole, avatar = '😎'): Player {
+  addPlayer(displayName: string, role: PlayerRole, avatar = '😎', isBot = false): Player {
     const id = nanoid();
-    const isHost = this.players.size === 0 && role === 'player';
+    // A bot never hosts: the human who opened the room stays in charge of it.
+    const isHost = this.players.size === 0 && role === 'player' && !isBot;
     if (isHost) this.hostId = id;
     const player: PlayerState = {
       id,
       displayName,
       avatar,
       isHost,
+      isBot,
       role,
       connection: 'CONNECTED',
       ready: false,
@@ -227,7 +230,10 @@ export class Room {
   removePlayer(id: string): void {
     const wasHost = this.hostId === id;
     this.players.delete(id);
-    if (this.players.size === 0) {
+    // Bots don't keep a room alive. Without this a solo room whose human left
+    // would sit in the store with a bot playing to nobody.
+    const humans = [...this.players.values()].filter((p) => !p.isBot).length;
+    if (this.players.size === 0 || humans === 0) {
       this.close();
       return;
     }
@@ -238,7 +244,7 @@ export class Room {
   private migrateHost(): void {
     // Promote the longest-connected active player (design doc §4).
     const candidate = [...this.players.values()]
-      .filter((p) => p.role === 'player' && p.connection === 'CONNECTED')
+      .filter((p) => p.role === 'player' && p.connection === 'CONNECTED' && !p.isBot)
       .sort((a, b) => a.joinedAt - b.joinedAt)[0];
     if (!candidate) return;
     for (const p of this.players.values()) p.isHost = false;
@@ -328,6 +334,9 @@ export class Room {
       ownCategory.slug,
       this.usedPromptKeys, // excludes current assignments + everything used this game
       this.deps.rng,
+      // Same restriction as the deal: a swap must not land the player on a
+      // prompt the bot has no clue for and cannot recognise.
+      this.config.mode === 'solo' ? isBotPlayable : undefined,
     );
     if (!replacement) throw new Error('No more prompts to shuffle to.');
 
@@ -405,7 +414,10 @@ export class Room {
       this.active.solvers.set(playerId, { rank: solveRank, ms: elapsedMs, points });
       player.guesserPointsRound += points;
       player.score += points;
-      this.cluesGuessed += 1;
+      // Counts PEOPLE solving clues: this number is summed into the public
+      // landing-page counter (see stats.ts), and a bot padding it would make
+      // that number exactly the kind of fiction it was written to replace.
+      if (!player.isBot) this.cluesGuessed += 1;
     } else if (env.logGuessMisses) {
       // Tuning data: review these for near-misses the matcher should accept.
       console.log(`[guess-miss] ${this.code} "${text}" != "${prompt.answer}"`);
@@ -529,7 +541,12 @@ export class Room {
     const playerIds = [...this.players.values()]
       .filter((p) => p.role === 'player')
       .map((p) => p.id);
-    if (this.config.packMode === 'mixed') {
+    // Solo rounds may only deal prompts the bot has clues for, and only from
+    // the packs those clues cover — it has to author for its own prompt and
+    // recognise the human's. 'mixed' is meaningless with one pack-limited
+    // opponent, so solo always deals a shared round pack.
+    const solo = this.config.mode === 'solo';
+    if (this.config.packMode === 'mixed' && !solo) {
       // Every player draws from a different pack. No round-level pack exists,
       // so `this.category` stays null and readers use the per-player map.
       const dealt = this.deps.content.dealMixedRound(
@@ -550,10 +567,13 @@ export class Room {
       });
     } else {
       const dealt = this.deps.content.dealRound(
-        this.deps.content.categorySlugsForPack(this.config.packSlug),
+        solo
+          ? this.deps.content.soloPackSlugs(this.config.packSlug)
+          : this.deps.content.categorySlugsForPack(this.config.packSlug),
         playerIds.length,
         this.usedPromptKeys,
         this.deps.rng,
+        solo ? isBotPlayable : undefined,
       );
       if (!dealt) {
         this.deps.hooks.onStateChange(this);
@@ -888,6 +908,7 @@ function toPublicPlayer(p: PlayerState): Player {
     displayName: p.displayName,
     avatar: p.avatar,
     isHost: p.isHost,
+    isBot: p.isBot,
     role: p.role,
     connection: p.connection,
     ready: p.ready,

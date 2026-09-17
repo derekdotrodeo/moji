@@ -55,7 +55,15 @@ function SocialProof() {
   );
 }
 
-export function Landing({ onCreate, onJoin }: { onCreate: () => void; onJoin: () => void }) {
+export function Landing({
+  onCreate,
+  onJoin,
+  onSolo,
+}: {
+  onCreate: () => void;
+  onJoin: () => void;
+  onSolo: () => void;
+}) {
   return (
     <div className="mx-auto max-w-5xl animate-moji-pop px-4 py-10">
       <div className="grid items-center gap-10 md:grid-cols-2">
@@ -80,6 +88,14 @@ export function Landing({ onCreate, onJoin }: { onCreate: () => void; onJoin: ()
               Join with a Code
             </StickerButton>
           </div>
+          {/* Nobody around is the normal state for a party game link. One click,
+              no code, no lobby, no waiting for a second player. */}
+          <button
+            onClick={onSolo}
+            className="font-mono text-xs uppercase tracking-[1.5px] text-muted underline decoration-dotted underline-offset-4 hover:text-cyan"
+          >
+            🤖 or play a quick round vs Mojibot
+          </button>
           <div className="flex items-center justify-center gap-3 md:justify-start">
             <div className="flex -space-x-2">
               {PROOF.map((e, i) => (

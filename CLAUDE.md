@@ -81,11 +81,31 @@ Break these only on purpose.
   guesser their *own* pack as the hint for someone else's clue. Same rule server-side —
   `Room.reshufflePrompt` draws from `assignmentCategories.get(playerId)`, not `this.category`, or a
   swap moves you into a pack your guessers were never told about.
+- **The solo bot is a headless client, not a privileged one.** `RoomConfig.mode: 'solo'` puts one
+  bot in the room (`RoomManager.createSoloRoom`, started on join — no lobby). `BotDriver` is fed
+  `serializeRoomFor(snapshot, botId)` — the *same* payload a browser gets — and acts only through
+  `Room`'s guarded commands. It therefore cannot see the answer to a human's clue and has to
+  actually guess (`bots/brain.ts`: IDF-weighted emoji overlap against its own clue library, scoped
+  to the clue's pack). Two consequences to preserve. **One:** never hand the driver a snapshot, a
+  `Room` reference for reading, or an answer — the moment you do, the bot cheats and the mode stops
+  being a live test of the serializer. **Two:** its confidence sets its *solve time*, not just its
+  answer, which is what makes it enforce the author curve — a literal clue is cracked early and pays
+  little. A bot that knew the answer and waited a random interval would score the same and prove
+  nothing. Its driver only ever acts on a timer, so `onStateChange` can't re-enter mid-mutation.
+- **Solo content is a closed set, both ways.** The bot needs a hand-written clue to author for its
+  own prompt *and* the human's prompt in its index to have a chance of guessing, so solo rounds deal
+  only `isBotPlayable` prompts from `soloPackSlugs()` (`content/solo.ts`), and a prompt swap is
+  filtered the same way. Adding a solo pack means authoring ~24+ clues for it, not flipping a flag;
+  `content/bot-clues.test.ts` holds the floor. Bot solves are **excluded from `cluesGuessed`** — that
+  number is summed into the public landing-page counter, and a bot padding it makes it the fiction
+  the counter was written to replace.
 - **Game phases:** LOBBY → ROUND_INTRO → PROMPT_ASSIGNMENT → CLUE_CREATION → CLUE_REVEAL →
   GUESSING → CLUE_SCORING → ROUND_RESULTS → GAME_RESULTS → ROOM_CLOSED (`packages/shared/src/types.ts`).
 - **Defaults:** 3 rounds, 60s clue creation, 30s guessing, 3 prompt swaps at 150 points each,
-  `packMode: 'shared'` (`DEFAULT_ROOM_CONFIG`). Three rounds is a playtest-tuned choice for snappier
-  first games; the host can raise it.
+  `packMode: 'shared'`, `mode: 'party'` (`DEFAULT_ROOM_CONFIG`). Three rounds is a playtest-tuned
+  choice for snappier first games; the host can raise it. Solo overrides to 2 rounds and 45s clue
+  creation (`SOLO_ROOM_CONFIG`) — about four minutes, because it exists to be played once by
+  somebody deciding in the first thirty seconds whether to keep going.
 
 ## Content
 
@@ -97,6 +117,13 @@ prompt is the whole game, and it is not obvious from the data file.
 
 The first playtest went well (August 2026). Current work: fixing bugs surfaced in play, and
 adding content.
+
+**Solo mode shipped (September 2026)** — one human vs `Mojibot`, reachable from the landing page or
+directly at `/solo`, built so the game is playable by someone who has nobody to play with (a
+portfolio reader, a first-time visitor). See the two bot invariants above. It ships with 102
+hand-written clue sets across three packs (Disney, Fairy Tales & Rhymes, Children's Movies), two
+variants each; the variants are not decoration, they widen the vocabulary the bot can recognise a
+human reaching for.
 
 The pack split (August 2026) went from 4 umbrellas to 17 packs, and added **Songs** (77) and
 **Toys & Board Games** (57) to broaden Pop Culture past Disney + superheroes. **Stage & Musicals**

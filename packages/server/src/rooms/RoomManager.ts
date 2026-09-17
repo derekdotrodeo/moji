@@ -8,10 +8,12 @@
  */
 import {
   DEFAULT_SCORING,
+  SOLO_ROOM_CONFIG,
   type ChatMessage,
   type JoinRoomPayload,
   type PublicGuess,
 } from '@moji/shared';
+import { BotDriver } from '../bots/BotDriver.js';
 import type { Broadcaster } from '../realtime/Broadcaster.js';
 import { serializeRoomFor } from '../realtime/serialize.js';
 import { issueSessionToken, verifySessionToken } from '../auth/session.js';
@@ -21,6 +23,10 @@ import { Room, type RoomHooks } from './Room.js';
 import type { RoomStore } from './RoomStore.js';
 
 const DISCONNECT_GRACE_MS = 60_000;
+
+/** The solo opponent. Named and avatared so the room reads as two players. */
+const BOT_NAME = 'Mojibot';
+const BOT_AVATAR = '🤖';
 
 export interface JoinOutcome {
   room: Room;
@@ -33,6 +39,8 @@ export class RoomManager implements RoomHooks {
   private socketToPlayer = new Map<string, { roomCode: string; playerId: string }>();
   private graceTimers = new Map<string, NodeJS.Timeout>();
   private persistedGames = new Set<string>();
+  /** playerId -> the driver for that bot, so state pushes can reach it. */
+  private bots = new Map<string, { roomCode: string; driver: BotDriver }>();
 
   constructor(
     private readonly store: RoomStore,
@@ -74,6 +82,12 @@ export class RoomManager implements RoomHooks {
       }
     }
 
+    // Solo: a fresh room with a bot in it, started on the spot. Deliberately
+    // not reachable with a `code` — you cannot bring a bot into someone
+    // else's game — and deliberately not a lobby, because there is nobody to
+    // wait for and the mode exists to be playable in one click.
+    if (payload.solo && !requestedCode) return this.createSoloRoom(socketId, displayName, payload);
+
     // Create or look up the room.
     let room: Room;
     if (requestedCode) {
@@ -94,6 +108,43 @@ export class RoomManager implements RoomHooks {
       playerId: player.id,
       sessionToken: issueSessionToken(player.id, room.code),
     };
+  }
+
+  private createSoloRoom(
+    socketId: string,
+    displayName: string,
+    payload: JoinRoomPayload,
+  ): JoinOutcome {
+    const code = generateRoomCode((c) => this.store.has(c));
+    const room = this.newRoom(code);
+    room.config = { ...SOLO_ROOM_CONFIG };
+    this.store.set(room);
+
+    // The human joins first, so they are the host and the bot never is.
+    const human = room.addPlayer(displayName, 'player', payload.avatar || '😎');
+    this.bind(socketId, code, human.id);
+    const bot = room.addPlayer(BOT_NAME, 'player', BOT_AVATAR, true);
+    this.spawnBot(room, bot.id);
+    room.start(human.id);
+
+    return { room, playerId: human.id, sessionToken: issueSessionToken(human.id, code) };
+  }
+
+  /**
+   * Attach a driver to a bot player. The commands below are the same guarded
+   * methods a socket handler calls — the bot has no private entrance to the
+   * room, which is the point of it (see bots/BotDriver.ts).
+   */
+  private spawnBot(room: Room, botId: string): void {
+    const driver = new BotDriver({
+      commands: {
+        submitClue: (emojis) => room.submitClue(botId, emojis),
+        submitGuess: (text) => void room.submitGuess(botId, text),
+        bump: () => room.bumpClue(botId),
+        chat: (text) => room.sendClueChat(botId, text),
+      },
+    });
+    this.bots.set(botId, { roomCode: room.code, driver });
   }
 
   command<T>(socketId: string, fn: (room: Room, playerId: string) => T): T {
@@ -139,6 +190,13 @@ export class RoomManager implements RoomHooks {
   onStateChange(room: Room): void {
     const snap = room.getSnapshot();
     for (const player of snap.players) {
+      if (player.isBot) {
+        // The bot is handed the same role-filtered payload a browser gets, and
+        // nothing else. Its driver only ever schedules work on a timer, so this
+        // call cannot re-enter the room mid-mutation.
+        this.bots.get(player.id)?.driver.onView(serializeRoomFor(snap, player.id));
+        continue;
+      }
       const socketId = this.playerToSocket.get(player.id);
       if (socketId) this.broadcaster.toSocket(socketId, 'room:state', serializeRoomFor(snap, player.id));
     }
@@ -170,6 +228,11 @@ export class RoomManager implements RoomHooks {
   onClosed(room: Room): void {
     this.persistedGames.delete(room.code);
     this.store.delete(room.code);
+    for (const [playerId, bot] of this.bots) {
+      if (bot.roomCode !== room.code) continue;
+      bot.driver.dispose(); // otherwise its timers outlive the room
+      this.bots.delete(playerId);
+    }
   }
 
   // ── binding helpers ──────────────────────────────────────────────────────

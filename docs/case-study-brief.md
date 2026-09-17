@@ -1,7 +1,7 @@
 # Moji — case study brief
 
 A briefing document for an agent writing a portfolio case study. Everything below was verified
-against the repo at `a9cad06` (main, clean), 2026-09-17.
+against the repo at `a9cad06`..HEAD (main), 2026-09-17.
 
 ## 1. What the project is
 
@@ -22,11 +22,12 @@ Use these; they are all checked. Do not invent others.
 
 | Thing | Value |
 |---|---|
-| Timeline | First commit 2026-06-20, latest 2026-08-31 (26 commits) |
-| Code size | ~9,500 lines of TS/TSX/MD, of which 1,366 is the curated prompt data file |
+| Timeline | First commit 2026-06-20, solo mode 2026-09-17 |
+| Code size | ~11,100 lines of TS/TSX/MD, of which 1,366 is the curated prompt data file |
 | Workspaces | 3 — `@moji/shared`, `@moji/server`, `@moji/client` (npm workspaces monorepo) |
-| Tests | 160 tests, 11 files, all passing, full suite in ~0.6s (Vitest) |
+| Tests | 193 tests, 14 files, all passing, full suite in ~0.7s (Vitest) |
 | Prompt library | 1,145 curated prompts, 30 leaf categories, 329 aliases on 241 entries |
+| Bot clue library | 102 answers, 204 hand-written clues, across 3 solo-eligible packs |
 | Packs | 17 selectable packs under 4 lobby umbrellas (Screen 492 / Pop Culture 322 / Stories 243 / Video Games 88 prompts) |
 | Game state machine | 10 phases, LOBBY → … → ROOM_CLOSED |
 | Socket contract | 12 client→server commands, 6 server→client pushes, all typed end-to-end |
@@ -97,7 +98,53 @@ clue turned into hangman with nobody looking at the emoji at all. It's now **0.4
 answer drops exactly one letter, an 11-letter one drops four. Enough to break a stall, not enough to
 replace the puzzle.
 
-### 3.4 Seams instead of premature infrastructure
+### 3.4 The solo bot is on the wrong side of the anti-cheat boundary
+
+This is the newest piece and probably the best one to lead the technical half with, because it is
+the only part a reader can *play* (see §5.3) and because it closes the loop on §3.1 and §3.2 at
+once.
+
+Solo mode puts one bot in the room. The bot is a **headless client**: `RoomManager` hands it the
+output of `serializeRoomFor(snapshot, botId)` — byte for byte what a browser on the other side of
+the room receives — and it acts only by calling the same guarded `Room` commands a socket handler
+calls. It is rate-limited, validated and rejected exactly like a human. The framing that makes it
+worth writing about:
+
+> The AI opponent is proof the anti-cheat boundary is real, because the opponent is on the wrong
+> side of it.
+
+It therefore cannot read the answer to your clue — the serializer doesn't put it in its payload — so
+it has to actually guess. It does that with small-scale TF-IDF retrieval: each answer in its clue
+library is a document (its emoji), your clue is the query, each emoji is weighted by how rare it is
+across the library (🦣 tells it far more than 😂), and candidates are ranked by cosine similarity,
+scoped to the clue's pack. The pack label being public is what makes this tractable — it narrows the
+bot's search exactly as it narrows a human's.
+
+**The part worth explaining slowly: confidence sets the bot's solve *time*, not just its answer.**
+Author points are `100 + 150 × (how long the solve took / window)`, so a clue cracked instantly pays
+its author almost nothing and one that takes the full window pays nearly double. Mapping confidence
+onto timing therefore makes the bot *enforce* the curve from §3.2: a literal clue scores a high
+cosine, gets guessed early, and earns you little; an oblique one has the bot circling, throwing
+wrong guesses into the public feed, and landing late — which pays. A bot that simply knew the answer
+and waited a random interval would produce identical-looking gameplay and mean nothing.
+
+It fails honestly, which is the other reason it's good material. Verified in a real game: given the
+deliberately meaningless clue 🎬🍿❓ for *The Polar Express*, it guessed "The Super Mario Bros.
+Movie" and "The Spongebob Squarepants Movie" — plausible neighbours from the same pack — and ran out
+of clock. Given the canonical 🦁👑🌅 it solves in about five seconds and the author earns ~127 of a
+possible 250.
+
+Cost and constraints, stated honestly: the bot needs a hand-written clue for its own prompt (a bot
+that built clues from the words in its prompt would produce exactly the literal clue the game
+punishes), so solo ships 204 hand-authored clues over 102 answers and deals only prompts that
+library covers — reusing the same ≥24-per-pack floor the party packs are held to. Expanding solo is
+an authoring job, not a flag.
+
+One detail that belongs in the "judgment" column: bot solves are excluded from `cluesGuessed`, the
+counter behind the public landing-page number (§5.2). A bot padding a public stat would make it
+exactly the fiction that counter was written to replace.
+
+### 3.5 Seams instead of premature infrastructure
 
 Live room state is in-process memory behind a `RoomStore` interface (39 lines) explicitly so it can
 become Redis-backed later without touching the state machine. Same pattern for `Broadcaster` (how
@@ -142,9 +189,9 @@ players × 3 rounds), if a leaf category ends up in no pack (silently undealable
 deal a duplicate answer. When the threshold trips, the documented fix is *content, not a lower
 threshold*. The thinnest pack today is Stage & Musicals at 26.
 
-## 5. Two product details worth a short section each
+## 5. Three product details worth a short section each
 
-**Link previews as the entire growth surface.** The game spreads exactly one way: someone pastes a
+**5.1 Link previews as the entire growth surface.** The game spreads exactly one way: someone pastes a
 room link into a group chat. So the server rewrites the HTML shell per-request — `/r/:code` stamps
 live Open Graph tags with the **current player count** ("4 players waiting.") into the card,
 `Cache-Control: no-store` because a CDN holding that count for a room that ended an hour ago is
@@ -152,13 +199,21 @@ worse than no card at all. The room-card description and the search-engine descr
 deliberately different strings doing different jobs. The room code from the URL is filtered down to
 the code alphabet before being echoed into HTML, not merely escaped.
 
-**Refusing to fake a number.** The landing page's social-proof slot previously held a hardcoded
+**5.2 Refusing to fake a number.** The landing page's social-proof slot previously held a hardcoded
 `128,402 clues guessed this week`. It now reads a real count from `GET /api/stats`. Every field is
 nullable, the query never throws, and the component renders **nothing** on a null, a failure, *or* a
 zero — a quiet week shows no line rather than "0 clues guessed." The stated reason, in the code
 comment: *"a fake number on a public site is the kind of detail that turns a launch thread into a
 thread about the author."* It shows the all-time total rather than the weekly one, with a note to
 switch the field and the copy together when the weekly number stops embarrassing itself.
+
+**5.3 A party game has to be playable by one person.** The failure mode of a multiplayer game in a
+portfolio is that nobody can try it: a reader who clicks through has no room, no code and nobody to
+play with. Solo mode (§3.4) is the answer — `/solo` deals a game against the bot on load, no lobby,
+no signup, two rounds, about four minutes end to end. Worth noting *why* it cost so little to build:
+`MIN_PLAYERS` was already 2, `start()` only checks the host and the player count, and every
+broadcast path keys off a `playerId → socketId` map that a socketless player simply falls out of. A
+bot was a legal player before anyone wrote one.
 
 ## 6. Craft signals for the "how I work" angle
 
@@ -183,21 +238,30 @@ switch the field and the copy together when the weekly number stops embarrassing
 
 1. **Hook** — the 🦁👑 problem: a game where the most obvious clue must be the *losing* one, and how
    you make scoring enforce that.
-2. **What it is** — 3–4 sentences + a screenshot or short GIF of the Guess screen (clue tiles,
+2. **Play it** — put the `/solo` link high, not at the bottom. The strongest thing this project can
+   do on a portfolio page is be played for four minutes by someone who came to read.
+3. **What it is** — 3–4 sentences + a screenshot or short GIF of the Guess screen (clue tiles,
    filling letter blanks, live feed).
-3. **Server-authoritative by construction** — §3.1, with the "answer is absent from the payload"
+4. **Server-authoritative by construction** — §3.1, with the "answer is absent from the payload"
    framing and one test-name pull-quote.
-4. **Designing the incentive** — §3.2, flat rate → time-weighted, plus paid swaps and the un-floored
+5. **Designing the incentive** — §3.2, flat rate → time-weighted, plus paid swaps and the un-floored
    charge.
-5. **Tuning by playtest** — §3.3 hints at 0.75 → 0.4; also the 3-round default and the shift to 17
+6. **An opponent that can't cheat** — §3.4. Lands hardest straight after §3.1 and §3.2, because it
+   depends on both: the bot is bounded by the serializer and it enforces the author curve. Include
+   the 🎬🍿❓ failure and the 🦁👑🌅 five-second solve as a matched pair.
+7. **Tuning by playtest** — §3.3 hints at 0.75 → 0.4; also the 3-round default and the shift to 17
    narrow packs.
-6. **Content as engineering** — §4, the FOOD rule, the Bands rejection, constraints encoded as tests.
-7. **Shipping details** — §5, link previews and the refusal to fake a number.
-8. **What's next** — §8 below.
+8. **Content as engineering** — §4, the FOOD rule, the Bands rejection, constraints encoded as
+   tests, and the bot clue library as content with a functional job (§3.4).
+9. **Shipping details** — §5, link previews, the refusal to fake a number, solo as the answer to
+   "nobody can try a multiplayer game".
+10. **What's next** — §8 below.
 
 Visual assets to request/capture: the Create screen (prompt + emoji builder tray), the Guess screen
 mid-round, the Reveal screen (answer + solve times + author points), and a room-link card as it
-renders in a chat client.
+renders in a chat client. For §3.4, the single best asset is a capture of the guess feed while the
+bot is wrong — its near-miss guesses next to the filling letter blanks show the mechanism better
+than prose does.
 
 ## 8. Known open work (good "what's next" material, all honest)
 
@@ -208,6 +272,11 @@ renders in a chat client.
 - **A prompt can only live in one pack.** `prompts.categoryId` is a single FK. Four real cases were
   dropped on this (*Twister*, *Bohemian Rhapsody*, *My Little Pony*, *Care Bears*). Fix is a
   `prompt_categories` join table; deliberately deferred.
+- **Solo covers 3 packs of 17.** Disney, Fairy Tales & Rhymes and Children's Movies have clue
+  libraries; the other fourteen don't, and each needs ~24+ hand-written clues to become
+  solo-eligible. The gate is authoring effort, and the test suite refuses a half-covered pack.
+- **The bot only plays one skill level.** Its tuning (`DEFAULT_BOT_TUNING`) is a single set of
+  constants; difficulty would be a matter of exposing them, not new machinery.
 - **Mixed pack mode is built** (every player draws from a different pack — 3 rounds × 4 players
   touches 12 packs instead of 3). It solves *variety*; Blitz solves *pacing*; the two compose.
 
@@ -221,6 +290,12 @@ renders in a chat client.
 - **Don't call the persistence layer "scalable" or claim Redis/horizontal scaling.** It's in-memory
   with a documented seam for later. That's the honest and more impressive framing.
 - **Don't quote the prompt total as a round number.** It's 1,145 (the content doc says "~1150").
+- **Do not call the bot an LLM, "AI-powered", or machine learning.** It is TF-IDF cosine similarity
+  over a hand-authored corpus of ~200 emoji clues, with a timing model on top. No model, no API
+  call, no training. Saying so plainly is more impressive than the alternative to anyone qualified
+  to hire for this, and calling it AI invites exactly the question it fails.
+- **Don't claim the bot is unbeatable or especially strong.** It loses often, and losing honestly is
+  the designed behaviour. Its skill is a set of constants, not a result.
 - Two small doc drifts if precision matters: `docs/content-guidelines.md` says "15" packs where the
   code has 17, and `README.md` links a design doc (`i-want-to-build-dazzling-lemon.md`) that isn't in
   the repo — both are known and noted in `CLAUDE.md`.

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useGame } from './useGame.js';
 import { getStoredAvatar, getStoredName, tokenRoomCode } from './session.js';
 import { Landing } from './screens/Landing.js';
@@ -10,9 +10,9 @@ import { GuessScreen } from './screens/Guess.js';
 import { RevealScreen } from './screens/Reveal.js';
 import { Leaderboard } from './screens/Leaderboard.js';
 import { Winner } from './screens/Winner.js';
-import { JoiningNextRound, SplashScreen } from './screens.js';
+import { DealingSolo, JoiningNextRound, SplashScreen } from './screens.js';
 
-type PreGameRoute = 'landing' | 'create' | 'join';
+type PreGameRoute = 'landing' | 'create' | 'join' | 'solo';
 
 export default function App() {
   const game = useGame();
@@ -20,11 +20,24 @@ export default function App() {
   const [route, setRoute] = useState<PreGameRoute>('landing');
   const [prefillCode, setPrefillCode] = useState('');
   // Capture the URL on first render, before the URL-sync effect can change it.
+  const initialPath = useRef(window.location.pathname);
   const initialCode = useRef(window.location.pathname.match(/^\/r\/([0-9A-Za-z]+)/)?.[1]?.toUpperCase());
+
+  // One click from anywhere: /solo deals a game against the bot immediately,
+  // so a link can drop someone straight into playing.
+  const startSolo = useCallback(() => {
+    setRoute('solo');
+    void game.joinSolo(getStoredName() || 'You', getStoredAvatar()).catch(() => setRoute('landing'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // On load with /r/<CODE>: silently rejoin if it's the room our token is for
   // (e.g. an accidental refresh), otherwise open Join with the code pre-filled.
   useEffect(() => {
+    if (initialPath.current === '/solo') {
+      startSolo();
+      return;
+    }
     const code = initialCode.current;
     if (!code) return;
     if (tokenRoomCode() === code) {
@@ -72,8 +85,15 @@ export default function App() {
   function render() {
     if (!view || view.phase === 'ROOM_CLOSED') {
       if (route === 'landing') {
-        return <Landing onCreate={() => setRoute('create')} onJoin={() => setRoute('join')} />;
+        return (
+          <Landing
+            onCreate={() => setRoute('create')}
+            onJoin={() => setRoute('join')}
+            onSolo={startSolo}
+          />
+        );
       }
+      if (route === 'solo') return <DealingSolo />;
       return (
         <Join
           mode={route === 'create' ? 'create' : 'join'}

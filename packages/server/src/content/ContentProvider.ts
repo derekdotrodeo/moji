@@ -11,6 +11,7 @@ import type { Db } from '../db/client.js';
 import { categories as categoriesTbl, promptAnswers, prompts } from '../db/schema.js';
 import { PACKS } from './database/prompt-database.js';
 import { SEED_CATEGORIES } from './seedData.js';
+import { soloPackSlugs } from './solo.js';
 
 /**
  * Pack display metadata (emoji + lobby heading), keyed by slug. Lives in the
@@ -141,6 +142,18 @@ export class ContentProvider {
   }
 
   /**
+   * Packs a solo game may deal from: the ones the bot has enough hand-written
+   * clues for (content/solo.ts), narrowed to whatever actually loaded. A
+   * `preferred` slug wins if it qualifies; otherwise the caller gets every
+   * eligible pack and the dealer picks.
+   */
+  soloPackSlugs(preferred = ''): string[] {
+    const eligible = soloPackSlugs().filter((slug) => this.byCategory.has(slug));
+    if (preferred && eligible.includes(preferred)) return [preferred];
+    return eligible;
+  }
+
+  /**
    * Deal a round: pick a category (from the allowed subset, else any), then
    * `count` distinct prompts, avoiding any in `usedPromptKeys`.
    */
@@ -149,9 +162,16 @@ export class ContentProvider {
     count: number,
     usedPromptKeys: Set<string>,
     pick: () => number, // injectable RNG in [0,1) — kept deterministic-friendly
+    /**
+     * Restricts what may be dealt at all (solo mode passes the bot's library).
+     * Applied before the used-prompt filter, so an exhausted pack falls back
+     * within the eligible set rather than escaping it.
+     */
+    eligible: (p: PromptForPlay) => boolean = () => true,
   ): DealtRound | null {
     const pool = (allowedSlugs.length ? allowedSlugs : [...this.byCategory.keys()])
       .map((s) => this.byCategory.get(s))
+      .map((c) => (c ? { ...c, prompts: c.prompts.filter(eligible) } : c))
       .filter((c): c is CategoryContent => !!c && c.prompts.length > 0);
     if (pool.length === 0) return null;
 
@@ -217,10 +237,11 @@ export class ContentProvider {
     categorySlug: string,
     excludeKeys: Set<string>,
     pick: () => number,
+    eligible: (p: PromptForPlay) => boolean = () => true,
   ): PromptForPlay | null {
     const cat = this.byCategory.get(categorySlug);
     if (!cat) return null;
-    const available = cat.prompts.filter((p) => !excludeKeys.has(promptKey(p)));
+    const available = cat.prompts.filter((p) => eligible(p) && !excludeKeys.has(promptKey(p)));
     if (available.length === 0) return null;
     return available[Math.floor(pick() * available.length)]!;
   }

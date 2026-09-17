@@ -30,6 +30,16 @@ emoji**, then the room plays the clues back one at a time and races to guess eac
 
 Defaults: 3 rounds, 60s to build a clue, 30s to guess each one. 2 players minimum, built for 4–10.
 
+### Solo (vs Mojibot)
+
+`/solo`, or the link under the buttons on the landing page: one human against a bot, no lobby, two
+rounds, about four minutes. The bot is a **headless client** — it is handed the same role-filtered
+`RoomView` a browser gets and issues the same commands, so it cannot see the answer to your clue and
+has to genuinely guess it from your emoji and the pack name. How sure it is sets *when* it guesses,
+so a literal clue gets cracked early and earns you very little. It plays hand-written clues
+(`server/src/content/database/bot-clues.ts`) and rounds are dealt only from prompts that library
+covers. See `server/src/bots/`.
+
 ## Stack
 
 - **Client** — React + TypeScript + Vite + Tailwind (`packages/client`)
@@ -93,6 +103,7 @@ Everything else is Socket.IO. See `packages/shared/src/events.ts` for the event 
 | `/healthz` | liveness + live room count |
 | `/api/stats` | public counters for the landing page (nulls when the DB is down) |
 | `/r/:code` | the app shell with live Open Graph tags for that room (`Cache-Control: no-store`) |
+| `/solo` | the app shell; the client deals a game against the bot on load |
 | `*` | the app shell with origin-corrected Open Graph tags |
 
 ## Workspace scripts
@@ -114,7 +125,7 @@ Everything else is Socket.IO. See `packages/shared/src/events.ts` for the event 
 ```
 packages/
   shared/   # @moji/shared — types, socket events, scoring, hints, emoji rules
-  server/   # @moji/server — http + socket.io, state machine, content, db, seams
+  server/   # @moji/server — http + socket.io, state machine, content, bots, db, seams
   client/   # @moji/client — react app
 docs/                  # content guidelines, case-study brief
 Dockerfile             # multi-stage: build client+server, run server

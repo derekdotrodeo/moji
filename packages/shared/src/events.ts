@@ -23,6 +23,12 @@ export interface JoinRoomPayload {
   /** chosen emoji avatar */
   avatar?: string;
   asSpectator?: boolean;
+  /**
+   * Create a solo room: one bot opponent, dealt from the packs it has clues
+   * for, started immediately. Ignored when `code` names an existing room —
+   * you cannot bring a bot into somebody else's game.
+   */
+  solo?: boolean;
   /** reconnection token from a previous session, if any */
   sessionToken?: string;
 }

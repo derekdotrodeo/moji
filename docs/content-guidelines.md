@@ -76,6 +76,26 @@ Note the current limit: `prompts.categoryId` is a single FK and the seeder keys 
 so **one entry can only live in one pack today**. The registry already supports a leaf feeding
 several packs; per-title membership needs a `prompt_categories` join table.
 
+### Clues for the solo bot
+
+`packages/server/src/content/database/bot-clues.ts` holds hand-written emoji clues for a subset of
+the library — currently 102 answers across Disney, Fairy Tales & Rhymes and Children's Movies, two
+variants each. They are content, and the same bar applies: a clue that is the answer as a picture
+makes the bot look like it is cheating and makes solo mode a worse advert for the game than no solo
+mode at all.
+
+Two things about this file that are not obvious:
+
+- **The variants are functional, not decorative.** The bot guesses a human's clue by scoring the
+  emoji it can see against these, so a second reading of a title is a second set of emoji it can
+  recognise someone reaching for. One variant per answer measurably narrows what it can solve.
+- **Coverage gates the mode.** Solo deals only prompts with clues, from packs where at least 24
+  prompts have them (`content/solo.ts`, same floor as a full party table). So adding a solo pack is
+  an authoring job of ~24+ clues, and `content/bot-clues.test.ts` fails the build rather than
+  letting a half-covered pack ship. It also rejects any clue `validateClue` would — the bot submits
+  through the same guarded command a human does, so an invalid clue means the bot silently sits a
+  round out.
+
 ## What makes a good prompt
 
 A good prompt sits in the band between *"nobody knows it"* and *"there is one obvious emoji for it."*

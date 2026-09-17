@@ -29,6 +29,8 @@ export interface Player {
   /** chosen emoji avatar (design: Join screen avatar picker) */
   avatar: string;
   isHost: boolean;
+  /** A bot player, driven server-side. Public: the room is told who is human. */
+  isBot: boolean;
   role: PlayerRole;
   connection: PlayerConnection;
   /** lobby ready-up state */
@@ -48,6 +50,19 @@ export interface Pack {
 
 export type PackMode = 'shared' | 'mixed';
 
+/**
+ * Who is in the room.
+ *  'party' — the normal game: humans only.
+ *  'solo'  — one human against a bot. Rounds are dealt only from prompts the
+ *            bot has hand-written clues for (see server/src/content/solo.ts),
+ *            because the bot has to both author for and recognise them.
+ *
+ * Set when the room is created and never reconfigured: it decides what the
+ * dealer is allowed to deal, so flipping it mid-game would strand a player on a
+ * prompt their opponent cannot play.
+ */
+export type GameMode = 'party' | 'solo';
+
 export interface RoomConfig {
   rounds: number;
   /** seconds */
@@ -64,6 +79,8 @@ export interface RoomConfig {
    *             ignored here: the mode's whole point is spanning the library.
    */
   packMode: PackMode;
+  /** party (humans) or solo (one human vs the bot); fixed at creation */
+  mode: GameMode;
   /** prompt swaps each player gets per round; 0 turns the feature off */
   reshuffles: number;
   /** score charged for each prompt swap; 0 makes swapping free */
@@ -76,8 +93,23 @@ export const DEFAULT_ROOM_CONFIG: RoomConfig = {
   guessingSeconds: 30, // design default (20 / [30] / 45)
   packSlug: '',
   packMode: 'shared',
+  mode: 'party',
   reshuffles: 3,
   reshuffleCost: 150, // a swap is a real choice, not a free reroll
+};
+
+/**
+ * Config for a solo room. Two rounds rather than three: solo exists to be
+ * played once, by someone deciding in the first thirty seconds whether to keep
+ * going, and two rounds against one opponent is four clues in about four
+ * minutes. Everything else is the real game's defaults — the point of the mode
+ * is to show the game, not a reduced version of it.
+ */
+export const SOLO_ROOM_CONFIG: RoomConfig = {
+  ...DEFAULT_ROOM_CONFIG,
+  mode: 'solo',
+  rounds: 2,
+  clueCreationSeconds: 45,
 };
 
 /** A single emoji clue authored by a player for their secret prompt. */
